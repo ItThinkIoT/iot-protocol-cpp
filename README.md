@@ -34,7 +34,7 @@ Methods:
 
 ID: 
 
-Ramdom number with up to 2^16 
+Unsigned random number with up to 2^16 that identifies the request.
 
 * Type: `uint16_t` as Big Endian format. **REQUIRED**
 * Example: `1822`
