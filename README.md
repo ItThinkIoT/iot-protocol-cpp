@@ -1,4 +1,4 @@
-# IoT Procotol
+# IoT Protocol
 
 IoT Protocol is a protocol over TCP based on HTTP for light data traffic.
 
