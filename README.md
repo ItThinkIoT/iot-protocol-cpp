@@ -16,7 +16,18 @@ PATH\n
 [B\n BODY]
 ```
 
-### VERSION
+### SEPARATOR char
+
+SEPARATOR char serves to divide pieces of information
+
+* Type: `char` | `byte` | `uint8_t`
+* Size: 1 byte
+* Constant: 
+  * char: `\n`
+  * hex: `0xA`
+  * decimal: `10`
+
+### [0] VERSION
 
 Version is the version of iot protocol. Used for compatibility.
 
@@ -24,9 +35,9 @@ Version is the version of iot protocol. Used for compatibility.
 * Size: 1 byte
 * Example: `1`
 
-### METHOD_ID
+### [1] METHOD+ID
 
-Method ID: METHOD+ID. 
+Method ID identifies the method of request and its id.
 
 Methods: 
 
@@ -47,7 +58,7 @@ Unsigned random number with up to 2^16 that identifies the request.
 * Size: 2 bytes
 * Example: `1822`
 
-### PATH
+### [2] PATH
 
 The path component contains data, usually organized in hierarchical
 form, that, serves to identify a resource [URI > 3.3 Path](https://www.rfc-editor.org/info/rfc3986).
@@ -56,18 +67,18 @@ form, that, serves to identify a resource [URI > 3.3 Path](https://www.rfc-edito
 * Example: `/foo/bar`
 * Default: `/`
 
-### HEADERS
+### [3] HEADERS
 
-Key Value Pair joined by `:` char, that, serves to set an attribute value for the request. Multiple headers must be separate para SEPARATOR char (`\n`).
+Key Value Pair joined by `:` char, that, serves to set an attribute value for the request. Multiple headers must be separate by SEPARATOR char (`\n`).
 
 * Type: `Map<string, string>`. **OPTIONAL** 
 * Example: 
-  * Single header: `foo:bar`
-  * Multiple headers: `foo:bar\nlorem:ipsum`
+  * Single header: `foo:bar\n`
+  * Multiple headers: `foo:bar\nlorem:ipsum\n`
 
-### BODY
+### [4] BODY
 
-The final data to be used for request receiver. Starts with `B\n`. 
+The final data to be sent for request receiver. Starts with `B\n`. 
 
 * Type: `uint8_t[]`
 * Example:
