@@ -2,6 +2,10 @@
 
 IoT Protocol is a protocol over TCP based on HTTP for light data traffic.
 
+**Motivation**: HTTP 1.1 (*http://*) request minimum size is 26 bytes (https://stackoverflow.com/a/25065027/1956719) and the HOST param is mandatory for all requests. 
+
+The IOT_PROTOCOL (*iot://*) request minimum size is 8 bytes withless to require HOST param for requests.
+
 ## Preamble Version 1
 
 ```js
@@ -16,8 +20,9 @@ PATH\n
 
 Version is the version of iot protocol. Used for compatibility.
 
-- Type: `byte` | `uint8_t`. **REQUIRED**
-- Example: `1`
+* Type: `byte` | `uint8_t`. **REQUIRED**
+* Size: 1 byte
+* Example: `1`
 
 ### METHOD_ID
 
@@ -26,10 +31,12 @@ Method ID: METHOD+ID.
 Methods: 
 
 * Type: `char`. **REQUIRED**
+* Size: 1 byte
 * Example: `R`
 
-- `R` | `0x82`: *Request* method used to do calls needs a response
 - `S` | `0x83`: *Signal* method used to send signals like events
+- `R` | `0x82`: *Request* method used to do calls needs a response
+- `r` | `0x114`: *Response* method used to responds a request
 
 
 ID: 
@@ -37,6 +44,7 @@ ID:
 Unsigned random number with up to 2^16 that identifies the request.
 
 * Type: `uint16_t` as Big Endian format. **REQUIRED**
+* Size: 2 bytes
 * Example: `1822`
 
 ### PATH
@@ -44,10 +52,8 @@ Unsigned random number with up to 2^16 that identifies the request.
 The path component contains data, usually organized in hierarchical
 form, that, serves to identify a resource [URI > 3.3 Path](https://www.rfc-editor.org/info/rfc3986).
 
-* Type: `uint8_t[]`. **REQUIRED**
-* Example: 
-  * `0xA` (10)
-  * `/foo/bar` 
+* Type: `string`. **REQUIRED**
+* Example: `/foo/bar`
 * Default: `/`
 
 ### HEADERS
@@ -67,7 +73,6 @@ The final data to be used for request receiver. Starts with `B\n`.
 * Example:
   * Message: `B\nlorem ipsum message`
   * Buffer: `['B', '\n', 0x1, 0x2, 0x3, 0x4]`
-
 
 ## Middlewares
 

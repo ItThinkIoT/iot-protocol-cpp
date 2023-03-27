@@ -20,10 +20,10 @@ void IoTApp::runMiddleware(IoTRequest *request, int index = 0)
     this->middlewares.at(index)(request, &_next);
 
     /* If is the last middleware */
-    if(index == this->middlewares.size()-1) {
+    if (index == this->middlewares.size() - 1)
+    {
         /* Free memory */
-        free(request->path);
-        free(request->body);
+        this->freeRequest(request);
     }
 }
 
@@ -32,7 +32,78 @@ void IoTApp::listen(Client *client)
     this->clients.push_back(client);
 }
 
-void IoTApp::resetClients() {
+uint16_t IoTApp::generateRequestId()
+{
+    uint16_t id = (uint16_t)(millis() % 10000);
+    if (this->requestResponse.find(id) != this->requestResponse.end() || id == 0)
+    {
+        return this->generateRequestId();
+    }
+    return id;
+}
+
+IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestResponse)
+{
+
+    request->version = IOT_VERSION;
+
+    if (request->id == 0)
+    {
+        request->id = this->generateRequestId();
+    }
+
+    if (request->path == NULL)
+    {
+        request->path = static_cast<char *>(malloc(1 * sizeof(char) + 1));
+        request->path[0] = '/';
+        request->path[1] = '\0';
+    }
+    size_t pathLength = strlen(request->path);
+
+    String headers = "";
+    for (auto header = request->headers.begin(); header != request->headers.end(); ++header)
+    {
+        headers += header->first + ":" + header->second + "\n";
+    }
+
+    size_t dataLength = 1 + 1 + 1 + 2 + 1 /* (version+\n+method+id+\n) */ + pathLength + 1 /* (\n) */ + headers.length();
+
+    if (request->body != NULL)
+    {
+        dataLength += 1 + 1 /* (B+\n) */ + request->bodyLength;
+    }
+
+    uint8_t *data = (uint8_t *)(malloc(dataLength * sizeof(uint8_t)));
+    data[0] = request->id;
+    data[1] = '\n';
+    data[2] = static_cast<uint8_t>((char)request->method);
+    data[3] = request->id >> 8; /* Id as Big Endian (MSB first) */
+    data[4] = request->id - (data[3] << 8);
+    data[5] = '\n';
+    memcpy((data + 6), request->path, pathLength);
+    size_t nextIndex = 6 + pathLength + 1;
+    data[nextIndex] = '\n';
+    nextIndex++;
+
+    if (headers.length() > 0)
+    {
+        memcpy((data + nextIndex), headers.c_str(), headers.length());
+        nextIndex += (headers.length() + 1);
+    }
+    if (request->body != NULL)
+    {
+        data[nextIndex] = 'B';
+        data[++nextIndex] = '\n';
+        memcpy((data + nextIndex + 1), request->body, request->bodyLength);
+    }
+
+    request->client->write(data, dataLength);
+
+    return request;
+}
+
+void IoTApp::resetClients()
+{
     this->clients.clear();
 }
 
@@ -42,8 +113,8 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
     IoTRequest request = {
         1,
         EIoTMethod::SIGNAL,
+        0,
         NULL,
-        std::map<String, String>(),
         std::map<String, String>(),
         NULL,
         0,
@@ -60,38 +131,53 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
     {
         indexN = indexOf(buffer, bufLen, '\n', indexStart);
 
-        uint8_t *bufferPartStart = buffer + indexStart;
+        uint8_t *bufferPart = buffer + indexStart;
         size_t bufferPartLength = ((indexN == -1 || isBody) ? (bufLen + 1) : indexN) - indexStart;
 
-        uint8_t bufferPart[bufferPartLength];
-        for (size_t i = 0; i < bufferPartLength; i++)
-        {
-            bufferPart[i] = bufferPartStart[i];
-        }
+        // uint8_t bufferPart[bufferPartLength];
+        // for (size_t i = 0; i < bufferPartLength; i++)
+        // {
+        //     bufferPart[i] = bufferPartStart[i];
+        // }
 
         // [ 0 \n 1 2 \n 3 4 5 \n 6 7 8 9]
         switch (foundN)
         {
         case 0:
-            if(bufferPartLength > 1) {
+            if (bufferPartLength > 1)
+            {
                 invalidRequest = true;
                 continue;
             }
             request.version = static_cast<byte>((char)bufferPart[0]);
             break;
         case 1:
+            /* Fix: ID = [\n, *] | [*, \n] | [\n,\n] */
+            if (bufferPartLength != 3)
+            {
+                indexN = indexStart + 3;
+                if (buffer[indexN] == ((uint8_t)(0xA)) /* (0xA = \n) */)
+                {
+                    bufferPartLength = 3;
+                }
+                else
+                {
+                    invalidRequest = true;
+                    continue;
+                }
+            }
+
             request.method = static_cast<EIoTMethod>((char)bufferPart[0]);
+            request.id = (bufferPart[1] << 8) + bufferPart[2];
             break;
         case 2:
             request.path = static_cast<char *>(malloc(bufferPartLength * sizeof(char) + 1));
-            memcpy(request.path, bufferPartStart, bufferPartLength);
+            memcpy(request.path, bufferPart, bufferPartLength);
             request.path[bufferPartLength] = '\0';
-            /* @TODO: define params */
             break;
         default:
 
             /* Headers */
-            //  const indexKeyValue = bufferPart.indexOf(":");
             int indexKeyValue = indexOf(bufferPart, bufferPartLength, ':');
             if (indexKeyValue > 0 && isBody == false)
             {
@@ -120,7 +206,7 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
             if (isBody)
             {
                 request.body = (uint8_t *)(malloc(bufferPartLength * sizeof(uint8_t) + 1));
-                memcpy(request.body, bufferPartStart, bufferPartLength);
+                memcpy(request.body, bufferPart, bufferPartLength);
                 request.body[bufferPartLength] = '\0';
                 request.bodyLength = bufferPartLength;
                 isBody = false;
@@ -133,8 +219,8 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
 
     } while (indexN >= 0 && invalidRequest == false);
 
-    if (invalidRequest) return;
-
+    if (invalidRequest)
+        return;
 
     this->runMiddleware(&request);
 }
@@ -158,4 +244,10 @@ void IoTApp::loop()
             this->onData(client, buffer, (indexBuffer - 1));
         }
     }
+}
+
+void IoTApp::freeRequest(IoTRequest *request)
+{
+    free(request->path);
+    free(request->body);
 }

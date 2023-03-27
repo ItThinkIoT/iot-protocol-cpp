@@ -16,54 +16,70 @@
 
 #include "iot_helpers.h"
 
+#define IOT_VERSION (byte)1
 #define IOT_PROTOCOL_MAX_READ_LENGTH 1024
 
-    enum class EIoTMethod : char
-    {
-        SIGNAL = 'S',
-        REQUEST = 'R'
-    };
-
-    enum class EIoTRequestPart : char
-    {
-        BODY = 'B',
-    };
-
-    struct IoTRequest
-    {
-        byte version;
-        EIoTMethod method;
-        char* path;
-        std::map<String, String> params;
-        std::map<String, String> headers;
-        uint8_t * body;
-        size_t bodyLength;
-        Client * client;
-    };
-
-    typedef std::function<void(void)> Next;
+struct IoTRequest
+{
+    byte version;
+    EIoTMethod method;
+    uint16_t id;
+    char *path;
+    std::map<String, String> headers;
     
-    typedef void (*IoTMiddleware)(IoTRequest *, Next*);
+    uint8_t *body;
+    size_t bodyLength;
+    Client *client;
+};
 
-    class IoTApp
-    {
-    private: 
-        std::vector<Client *> clients;
-        void onData(Client* client, uint8_t* buffer, size_t bufLen);
-    public:
-        std::vector<IoTMiddleware> middlewares;
+typedef std::function<void(void)> Next;
+typedef void (*IoTMiddleware)(IoTRequest *, Next *);
 
-        void use(IoTMiddleware middleware);
+enum class EIoTMethod : char
+{
+    SIGNAL = 'S',
+    REQUEST = 'R',
+    RESPONSE = 'r'
+};
 
-        void runMiddleware(IoTRequest *request, int index);
+enum class EIoTRequestPart : char
+{
+    BODY = 'B',
+};
 
-        void listen(Client *client);
-        
-        void resetClients();
+struct IoTRequestResponse
+{
+    std::function<void(IoTRequest *response)> onResponse;
+    std::function<void(IoTRequest *request)> onResponse;
+    int timeout;
+};
 
-        void loop();
+class IoTApp
+{
+private:
+    std::vector<Client *> clients;
+    void onData(Client *client, uint8_t *buffer, size_t bufLen);
+    std::map<uint16_t, IoTRequestResponse*> requestResponse;
 
-    };
+public:
+    std::vector<IoTMiddleware> middlewares;
+
+    /* Common methods */
+    void use(IoTMiddleware middleware);
+    void runMiddleware(IoTRequest *request, int index);
+    void listen(Client *client);
+    uint16_t generateRequestId();
+    IoTRequest *signal(IoTRequest *request);
+    IoTRequest *request(IoTRequest *request, IoTRequestResponse *requestResponse);
+    IoTRequest *response(IoTRequest *request, uint8_t *body);
+    IoTRequest *send(IoTRequest *request, IoTRequestResponse *requestResponse);
+
+
+    /* Helpers methods */
+    void resetClients();
+    void loop();
+    void freeRequest(IoTRequest * request);
+};
 
 // #ifdef __cplusplus
 // }
