@@ -19,6 +19,13 @@
 #define IOT_VERSION (byte)1
 #define IOT_PROTOCOL_MAX_READ_LENGTH 1024
 
+enum class EIoTMethod : char
+{
+    SIGNAL = 'S',
+    REQUEST = 'R',
+    RESPONSE = 'r'
+};
+
 struct IoTRequest
 {
     byte version;
@@ -26,7 +33,7 @@ struct IoTRequest
     uint16_t id;
     char *path;
     std::map<String, String> headers;
-    
+
     uint8_t *body;
     size_t bodyLength;
     Client *client;
@@ -34,13 +41,6 @@ struct IoTRequest
 
 typedef std::function<void(void)> Next;
 typedef void (*IoTMiddleware)(IoTRequest *, Next *);
-
-enum class EIoTMethod : char
-{
-    SIGNAL = 'S',
-    REQUEST = 'R',
-    RESPONSE = 'r'
-};
 
 enum class EIoTRequestPart : char
 {
@@ -50,7 +50,7 @@ enum class EIoTRequestPart : char
 struct IoTRequestResponse
 {
     std::function<void(IoTRequest *response)> onResponse;
-    std::function<void(IoTRequest *request)> onResponse;
+    std::function<void(IoTRequest *request)> onTimeout;
     int timeout;
 };
 
@@ -59,7 +59,7 @@ class IoTApp
 private:
     std::vector<Client *> clients;
     void onData(Client *client, uint8_t *buffer, size_t bufLen);
-    std::map<uint16_t, IoTRequestResponse*> requestResponse;
+    std::map<uint16_t, IoTRequestResponse *> requestResponse = std::map<uint16_t, IoTRequestResponse *>();
 
 public:
     std::vector<IoTMiddleware> middlewares;
@@ -74,11 +74,9 @@ public:
     IoTRequest *response(IoTRequest *request, uint8_t *body);
     IoTRequest *send(IoTRequest *request, IoTRequestResponse *requestResponse);
 
-
     /* Helpers methods */
     void resetClients();
     void loop();
-    void freeRequest(IoTRequest * request);
 };
 
 // #ifdef __cplusplus
