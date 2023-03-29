@@ -47,21 +47,31 @@ enum class EIoTRequestPart : char
     BODY = 'B',
 };
 
+typedef std::function<void(IoTRequest *response)> OnResponse;
+typedef std::function<void(IoTRequest *request)> OnTimeout;
+
 struct IoTRequestResponse
 {
-    std::function<void(IoTRequest *response)> onResponse;
-    std::function<void(IoTRequest *request)> onTimeout;
-    int timeout;
+    OnResponse *onResponse;
+    OnTimeout *onTimeout;
+
+    unsigned long timeout;
+
+    IoTRequest request;
 };
 
 class IoTApp
 {
 private:
+    // std::vector<AsyncClient *> clients;
     std::vector<Client *> clients;
     void onData(Client *client, uint8_t *buffer, size_t bufLen);
-    std::map<uint16_t, IoTRequestResponse *> requestResponse = std::map<uint16_t, IoTRequestResponse *>();
+    // void handleData(void* arg, AsyncClient* client, void *data, size_t len);
+    // AcDataHandler handleData;
+    std::map<uint16_t, IoTRequestResponse> requestResponse = std::map<uint16_t, IoTRequestResponse>();
 
 public:
+    IoTApp();
     std::vector<IoTMiddleware> middlewares;
 
     /* Common methods */
