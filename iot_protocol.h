@@ -63,11 +63,8 @@ struct IoTRequestResponse
 class IoTApp
 {
 private:
-    // std::vector<AsyncClient *> clients;
     std::vector<Client *> clients;
     void onData(Client *client, uint8_t *buffer, size_t bufLen);
-    // void handleData(void* arg, AsyncClient* client, void *data, size_t len);
-    // AcDataHandler handleData;
     std::map<uint16_t, IoTRequestResponse> requestResponse = std::map<uint16_t, IoTRequestResponse>();
 
 public:

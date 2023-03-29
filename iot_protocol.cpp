@@ -2,10 +2,6 @@
 
 IoTApp::IoTApp()
 {
-    // this->handleData = [this](void *, AsyncClient *client, void *data, size_t len)
-    // {
-    //     this->onData(client, (uint8_t *)data, len);
-    // };
 }
 
 void IoTApp::use(IoTMiddleware middleware)
@@ -35,19 +31,6 @@ void IoTApp::runMiddleware(IoTRequest *request, int index = 0)
         free(request->body);
     }
 }
-
-// static void handleData(void* arg, AsyncClient* client, void *data, size_t len)
-// {
-//     Serial.print("[CALLBACK] data received, ip: " + client->remoteIP().toString());
-//     Serial.println( " [" + String((char*)data) + "]");
-
-//     // or loop through data , using data[i] and len:
-//     // for ( int i = 0 ; i < len ; i++ ) {
-//     //     if ( uint8_t*)data[i] == 0 ) { } }
-
-//     // could send to server here, by doing:
-//     // sendToServer( "Hello!");
-// }
 
 void IoTApp::listen(Client *client)
 {
@@ -235,12 +218,7 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
         dataLength += 2 + request->bodyLength; /* 1 + 1 (B+\n) + request->bodyLength */
     }
 
-    // uint8_t *data = (uint8_t *)(malloc(dataLength * sizeof(uint8_t)));
-    // uint8_t *data = new uint8_t[dataLength];
-
-    // char data[dataLength+1]; /* +1 (\0) */
     uint8_t data[dataLength + 1]; /* +1 (\0) */
-    // uint8_t data[6 + pathLength + 2]; /* +2 (\n\0) */
     data[0] = request->version;
     data[1] = '\n';
     data[2] = static_cast<uint8_t>((char)request->method);
@@ -250,39 +228,30 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
 
     size_t nextIndex = 5;
 
-    // memcpy((data + 6), request->path, pathLength);
     for (size_t i = 0; i < pathLength; i++)
     {
         data[++nextIndex] = *(request->path + i);
     }
 
-    // size_t nextIndex = 6 + pathLength; /* 5 (last index) + pathLength + 1 (next) */
-    // data[nextIndex] = '\n';
-    // nextIndex++;
-
     data[++nextIndex] = '\n';
     
     if (headers.length() > 0)
     {
-        // memcpy((data + nextIndex), headers.c_str(), headers.length());
         for (size_t i = 0; i < headers.length(); i++)
         {
             data[++nextIndex] = (headers.charAt(i));
         }
-        // nextIndex += headers.length();
     }
 
     if (request->body != NULL)
     {
         data[++nextIndex] = 'B';
         data[++nextIndex] = '\n';
-        // memcpy((data + nextIndex + 1), request->body, request->bodyLength);
         for (size_t i = 0; i < request->bodyLength; i++)
         {
             data[++nextIndex] = *(request->body + i);
         }
     }
-    // data[nextIndex + request->bodyLength + 1] = '\0';
 
     data[++nextIndex] = '\0';
 
@@ -298,94 +267,8 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
         this->requestResponse.insert(std::make_pair(request->id, *requestResponse));
     }
 
-    // request->client->print("teste");
-    // String _data = String((const char*)data);
-    // request->client->print(_data);
-    // const uint8_t* _data = data;
-
-    // const uint8_t* _data = data;
-    // request->client->print(String(_data, dataLength));
-    // request->client->print("lorem ipsum fuck the message how much logger is this better for our test and counter lorem ipsum fuck the message how much logger is this better for our test and counter lorem ipsum fuck the message how much logger is this better for our test and counter");
-
-    // request->client->add((const char*)data, dataLength);
-    // request->client->send();
-
-    // request->client->write((const char*)data, dataLength);
-
-    // const char* teste = (const char *)(malloc(dataLength * sizeof(char)));
-
-    /* char c[3];
-
-    c[0] = 'h';
-    c[1] = 'i';
-    c[2] = '\0'; */
-
-    //---- ok com path
-    // char c[6 + pathLength + 2];
-
-    // c[0] = request->version;
-    // c[1] = '\n';
-    // c[2] = static_cast<uint8_t>((char)request->method);
-    // c[3] = request->id >> 8;             /* Id as Big Endian - (MSB first) */
-    // c[4] = request->id - (data[3] << 8); /* Id as Big Endian - (LSB last)  */
-    // c[5] = '\n';
-    // size_t cursor = 6;
-    // // char p[pathLength];
-    // for (size_t i = 0; i < pathLength; i++)
-    // {
-    //     c[cursor + i] = *(request->path+i);
-    // }
-    // // char p[] = "/who/r/i";
-    // // for (size_t i = 0; i < 8; i++)
-    // // {
-    // //     c[cursor + i] = p[i];
-    // // }
-    // // memcpy((c + 6), request->path, pathLength);
-    // c[(6 + pathLength)] = '\n';
-    // c[(7 + pathLength)] = '\0';
-
-    // const char *d = c;
-    // request->client->write(d, dataLength);
-    //----- ok com path
-    // const uint8_t *d = data;
-
-    // std::copy(data, data+dataLength, teste);
-    // memcpy((char*)teste, data, dataLength);
-
     request->client->write(data, dataLength);
-    // request->client->write(d, 6 + pathLength + 1);
-
-    // size_t space = request->client->space();
-    // if (space > dataLength)
-    // {
-    //     // request->client->write((const char *)data, dataLength, ASYNC_WRITE_FLAG_MORE);
-
-    // }
-
-    // free((char*)teste);
-
-    // request->client->free();
-
-    // write the data in chunks
-    // int chunk_size = 16; // write data in 16-byte chunks
-    // for (int i = 0; i < dataLength; i += chunk_size)
-    // {
-    //     size_t remainToWrite = dataLength - i;
-    //     size_t amountToWrite = ( remainToWrite > chunk_size) ? chunk_size : remainToWrite;
-    //     int bytes_written = request->client->write(data + i, amountToWrite);
-    // }
-
-    // _data = String();
-
-    // request->client->flush();
-    // request->client->stop();
-
-    // request->client->;
-    // request->client->close();
-
-    // free(data);
-
-    // delete[] data;
+    
     if (shouldFreePath)
     {
         free(request->path);
