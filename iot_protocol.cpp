@@ -55,6 +55,8 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
     int indexStart = 0; // 9
     int indexN = -1;
     bool isBody = false;
+    uint8_t *remainBuffer = NULL; /* Reamins data on buffe rto be processed */
+    size_t remainBufferSize = 0;
 
     bool invalidRequest = false;
 
@@ -121,18 +123,23 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
             }
 
             /* Body */
-            if (isBody == false && bufferPartLength == 1 && static_cast<EIoTRequestPart>((char)bufferPart[0]) == EIoTRequestPart::BODY)
+            if (isBody == false && bufferPartLength == 3 && static_cast<EIoTRequestPart>((char)bufferPart[0]) == EIoTRequestPart::BODY)
             {
+                request.bodyLength = (bufferPart[1] << 8) + bufferPart[2];
                 isBody = true;
                 break;
             }
 
             if (isBody)
             {
-                request.body = (uint8_t *)(malloc(bufferPartLength * sizeof(uint8_t) + 1));
-                memcpy(request.body, bufferPart, bufferPartLength);
-                request.body[bufferPartLength] = '\0';
-                request.bodyLength = bufferPartLength;
+                request.body = (uint8_t *)(malloc(request.bodyLength * sizeof(uint8_t) + 1));
+                memcpy(request.body, bufferPart, request.bodyLength);
+                request.body[request.bodyLength] = '\0';
+                if (request.bodyLength < bufferPartLength)
+                {
+                    remainBuffer = (bufferPart + request.bodyLength);
+                    remainBufferSize = bufferPartLength - request.bodyLength;
+                }
                 isBody = false;
                 break;
             }
@@ -141,34 +148,38 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
         foundN++;
         indexStart = indexN + 1;
 
-    } while (indexN >= 0 && invalidRequest == false);
+    } while (indexN >= 0 && invalidRequest == false && remainBuffer == NULL);
 
     if (invalidRequest)
         return;
 
     /* Response */
-    auto rr = this->requestResponse.find(request.id);
-    if (rr != this->requestResponse.end())
-    {
-        if (rr->second.onResponse != NULL)
-        {
-            (*(rr->second.onResponse))(&request);
-            // (rr->second.onResponse)(&request);
-
-            /* free body and path ?! hehe */
-            free(request.path);
-            free(request.body);
-        }
-        this->requestResponse.erase(request.id);
-        return;
-    }
     if (request.method == EIoTMethod::RESPONSE)
     {
-        return;
+        auto rr = this->requestResponse.find(request.id);
+        if (rr != this->requestResponse.end())
+        {
+            if (rr->second.onResponse != NULL)
+            {
+                (*(rr->second.onResponse))(&request);
+                // (rr->second.onResponse)(&request);
+
+                /* free body and path ?! hehe */
+                free(request.path);
+                free(request.body);
+            }
+            this->requestResponse.erase(request.id);
+        }
+    }
+    else
+    {
+        /* Middleware */
+        this->runMiddleware(&request);
     }
 
-    /* Middleware */
-    this->runMiddleware(&request);
+    if(remainBuffer != NULL) {
+        this->onData(client, remainBuffer, remainBufferSize);
+    }
 }
 
 uint16_t IoTApp::generateRequestId()
@@ -215,7 +226,7 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
 
     if (request->body != NULL)
     {
-        dataLength += 2 + request->bodyLength; /* 1 + 1 (B+\n) + request->bodyLength */
+        dataLength += 4 + request->bodyLength; /* 1 + 2 + 1 (BODY_CHAR+BODY_LENGTH\n) + request->bodyLength */
     }
 
     uint8_t data[dataLength + 1]; /* +1 (\0) */
@@ -234,7 +245,7 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
     }
 
     data[++nextIndex] = '\n';
-    
+
     if (headers.length() > 0)
     {
         for (size_t i = 0; i < headers.length(); i++)
@@ -247,6 +258,8 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
     {
         data[++nextIndex] = 'B';
         data[++nextIndex] = '\n';
+        data[++nextIndex] = request->bodyLength >> 8;                       /* Body Length as Big Endian - (MSB first) */
+        data[++nextIndex] = request->bodyLength - (data[(nextIndex)] << 8); /* Id as Big Endian - (LSB last)  */
         for (size_t i = 0; i < request->bodyLength; i++)
         {
             data[++nextIndex] = *(request->body + i);
@@ -268,7 +281,7 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
     }
 
     request->client->write(data, dataLength);
-    
+
     if (shouldFreePath)
     {
         free(request->path);

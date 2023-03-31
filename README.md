@@ -2,9 +2,9 @@
 
 IoT Protocol is a protocol over TCP based on HTTP for light data traffic.
 
-**Motivation**: HTTP 1.1 (*http://*) request minimum size is 26 bytes (https://stackoverflow.com/a/25065027/1956719) and the HOST param is mandatory for all requests. 
+**Motivation**: HTTP 1.1 (*http://*)  protocol uses too much data traffic for IoT context. Its request minimum size is 26 bytes (https://stackoverflow.com/a/25065027/1956719) and the HOST param is mandatory for all requests. 
 
-The IOT_PROTOCOL (*iot://*) request minimum size is 8 bytes withless to require HOST param for requests.
+The IOT_PROTOCOL (*iot://*) is adapted for IoT context with light data traffic. Its request minimum size is 8 bytes withless to require HOST param for requests. 
 
 ## Preamble Version 1
 
