@@ -9,11 +9,11 @@ The IOT_PROTOCOL (*iot://*) request minimum size is 8 bytes withless to require 
 ## Preamble Version 1
 
 ```js
-VERSION\n
-METHOD+ID\n
-PATH\n
-[HEADERS\n]
-[B\n BODY]
+VERSION \n
+METHOD + ID \n
+PATH \n
+[HEADERS \n]
+[BODY_CHAR + BODY_LENGTH \n BODY]
 ```
 
 ### SEPARATOR char
@@ -26,64 +26,136 @@ SEPARATOR char serves to divide pieces of information
   * char: `\n`
   * hex: `0xA`
   * decimal: `10`
+  * binary: `0b1010`
 
 ### [0] VERSION
 
 Version is the version of iot protocol. Used for compatibility.
 
-* Type: `byte` | `uint8_t`. **REQUIRED**
+Format: `VERSION + SEPARATOR`. **REQUIRED** | **SINGLE**
+
+* Type: `byte` | `uint8_t`
 * Size: 1 byte
-* Example: `1`
+* Example: 
+  * decimal: `1`
+  * hex: `0x1`
+  * binary: `0b00000001`
 
 ### [1] METHOD+ID
 
 Method ID identifies the method of request and its id.
 
-Methods: 
+Format: `METHOD + ID + SEPARATOR`. **REQUIRED** | **SINGLE**
 
-* Type: `char`. **REQUIRED**
+**METHOD**: 
+
+Method is the reason why the request is made. **REQUIRED**
+
+* Type: `char`. 
 * Size: 1 byte
 * Example: `R`
 
-- `S` | `0x83`: *Signal* method used to send signals like events
-- `R` | `0x82`: *Request* method used to do calls needs a response
-- `r` | `0x114`: *Response* method used to responds a request
+* Methods types:
+  - *Signal*: method used to send signals like events
+    *  char: `S`
+    *  decimal: `131`
+    *  hex: `0x83`
+    *  binary: `0b10000011`
 
+  - *Request*: method used to do calls that needs a response
+    *  char: `R`
+    *  decimal: `130`
+    *  hex: `0x82`
+    *  binary: `0b10000010`
 
-ID: 
+  - *Response*: method used to responds a request
+    *  char: `r`
+    *  decimal: `114`
+    *  hex: `0x72`
+    *  binary: `0b1110010`
 
-Unsigned random number with up to 2^16 that identifies the request.
+**ID**: 
 
-* Type: `uint16_t` as Big Endian format. **REQUIRED**
+Unsigned random number with up to 2^16 that identifies the request. **REQUIRED**
+
+* Type: `uint16_t` as Big Endian format. 
 * Size: 2 bytes
-* Example: `1822`
+* Example: 
+    * decimal: `276`
+    * uint_8[2]: `[ 1 , 20 ]`
+    * binary: `0b00000001 00010100`
 
 ### [2] PATH
 
 The path component contains data, usually organized in hierarchical
-form, that, serves to identify a resource [URI > 3.3 Path](https://www.rfc-editor.org/info/rfc3986).
+form, that, serves to identify a resource [URI > 3.3 Path](https://www.rfc-editor.org/info/rfc3986). 
 
-* Type: `string`. **REQUIRED**
+Format: `PATH + SEPARATOR`. **REQUIRED** | **SINGLE**
+
+* Type: `string`
 * Example: `/foo/bar`
 * Default: `/`
 
 ### [3] HEADERS
 
-Key Value Pair joined by `:` char, that, serves to set an attribute value for the request. Multiple headers must be separate by SEPARATOR char (`\n`).
+Headers are be Key Value Pair that serves to set an attribute value for the request. Case sensitive.  
 
-* Type: `Map<string, string>`. **OPTIONAL** 
+Format: `HEADER + SEPARATOR`. **OPTIONAL** | **MULTIPLE**
+
+**HEADER**
+
+* Type: `string`
+* Format: `KEY + KEY_VALUE_SEPARATOR + VALUE`
+* *KEY*: 
+  * Type: `string`
+* *VALUE*: 
+  * Type: `string`
+* *KEY_VALUE_SEPARATOR*: 
+  * Constant:
+    *  char: `:`
+    *  decimal: `58`
+    *  hex: `0x3a`
+    *  binary: `0b00111010`
 * Example: 
   * Single header: `foo:bar\n`
   * Multiple headers: `foo:bar\nlorem:ipsum\n`
 
 ### [4] BODY
 
-The final data to be sent for request receiver. Starts with `B\n`. 
+The final data to be sent for request receiver. 
+
+Format: `BODY_CHAR + BODY_LENGTH+SEPARATOR + BODY`. **OPTIONAL** | **SINGLE**
+
+**BODY_CHAR**:
+
+Identifies the body part. **REQUIRED**
+
+  * Type: `char`
+  * Size: 1 byte
+  * Constant: 
+    * char: `B`
+    * hex: `0x42`
+    * decimal: `66`
+
+**BODY_LENGTH**: 
+
+The body's length.  **REQUIRED**
+
+  * Type: `uint16_t` as Big Endian format
+  * Size: 2 bytes
+  * Example: 
+    * decimal: `2321`
+    * uint_8[2]: `[ 9 , 17 ]`
+    * binary: `0b00001001 00010001`
+
+**BODY**:
+
+The body / contents of request. **REQUIRED**
 
 * Type: `uint8_t[]`
 * Example:
-  * Message: `B\nlorem ipsum message`
-  * Buffer: `['B', '\n', 0x1, 0x2, 0x3, 0x4]`
+  * String: `the message`
+  * Buffer: `[ 116, 104, 101, 32, 109, 101, 115, 115, 97, 103, 101 ]`
 
 ## Middlewares
 
