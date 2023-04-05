@@ -16,24 +16,33 @@
 
 #include "iot_helpers.h"
 
-#define IOT_VERSION (byte)1
+#define IOT_VERSION (uint8_t)1
+
+#define IOT_ETX 0x3
+#define IOT_RS 0x1E
+
+#define IOT_MCB_ID 0b00000010
+#define IOT_MCB_PATH 0b00000001
+#define IOT_LCB_HEADER 0b00000010
+#define IOT_LCB_BODY 0b00000001
+
+
 #define IOT_PROTOCOL_MAX_READ_LENGTH 1024
 
-enum class EIoTMethod : char
+enum class EIoTMethod : uint8_t
 {
-    SIGNAL = 'S',
-    REQUEST = 'R',
-    RESPONSE = 'r'
+    SIGNAL = 0x1,
+    REQUEST = 0x2,
+    RESPONSE = 0x3,
+    STREAMING = 0x4
 };
-
 struct IoTRequest
 {
-    byte version;
+    uint8_t version;
     EIoTMethod method;
     uint16_t id;
     char *path;
     std::map<String, String> headers;
-
     uint8_t *body;
     size_t bodyLength;
     Client *client;
@@ -49,7 +58,6 @@ enum class EIoTRequestPart : char
 
 typedef std::function<void(IoTRequest *response)> OnResponse;
 typedef std::function<void(IoTRequest *request)> OnTimeout;
-
 struct IoTRequestResponse
 {
     OnResponse *onResponse;

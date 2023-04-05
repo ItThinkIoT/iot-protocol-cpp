@@ -35,7 +35,6 @@ void IoTApp::runMiddleware(IoTRequest *request, int index = 0)
 void IoTApp::listen(Client *client)
 {
     this->clients.push_back(client);
-    // client->onData((this->handleData), NULL);
 }
 
 void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
@@ -102,11 +101,34 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
             request.path[bufferPartLength] = '\0';
             break;
         default:
+            // B:1 como header mas está vindo como body  ?soluttion:  add auto B+_ ?
+            /* Body */
+            if (isBody == false && static_cast<EIoTRequestPart>((char)bufferPart[0]) == EIoTRequestPart::BODY && bufferPartLength <= 3)
+            {
+                /* Fix: BODY length = [\n, *] | [*, \n] | [\n,\n] */
+                if (bufferPartLength != 3)
+                {
+                    indexN = indexStart + 3;
+                    if (buffer[indexN] == ((uint8_t)(0xA)) /* (0xA = \n) */)
+                    {
+                        bufferPartLength = 3;
+                    }
+                    else
+                    {
+                        invalidRequest = true;
+                        continue;
+                    }
+                }
 
+                request.bodyLength = (bufferPart[1] << 8) + bufferPart[2];
+                isBody = true;
+                break;
+            }
             /* Headers */
             int indexKeyValue = indexOf(bufferPart, bufferPartLength, ':');
-            if (indexKeyValue > 0 && isBody == false)
+            if (indexKeyValue > 1 && isBody == false)
             {
+                /* |B|0|58 || |B|58|0 */
                 char cBufferPart[bufferPartLength];
                 memcpy(cBufferPart, bufferPart, bufferPartLength);
 
@@ -122,14 +144,6 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
                 break;
             }
 
-            /* Body */
-            if (isBody == false && bufferPartLength == 3 && static_cast<EIoTRequestPart>((char)bufferPart[0]) == EIoTRequestPart::BODY)
-            {
-                request.bodyLength = (bufferPart[1] << 8) + bufferPart[2];
-                isBody = true;
-                break;
-            }
-
             if (isBody)
             {
                 request.body = (uint8_t *)(malloc(request.bodyLength * sizeof(uint8_t) + 1));
@@ -140,7 +154,6 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
                     remainBuffer = (bufferPart + request.bodyLength);
                     remainBufferSize = bufferPartLength - request.bodyLength;
                 }
-                isBody = false;
                 break;
             }
         }
@@ -177,7 +190,8 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
         this->runMiddleware(&request);
     }
 
-    if(remainBuffer != NULL) {
+    if (remainBuffer != NULL)
+    {
         this->onData(client, remainBuffer, remainBufferSize);
     }
 }
@@ -201,65 +215,142 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
         request->version = IOT_VERSION;
     }
 
-    if (request->id == 0)
+    uint8_t MCB = request->version << 2;
+    uint8_t LCB = (uint8_t)(request->method) << 2;
+
+    uint8_t bodyLengthSize = 2;
+
+    LCB += (((request->headers.size() > 0) ? IOT_LCB_HEADER : 0) + ((request->body != NULL) ? IOT_LCB_BODY : 0));
+
+    switch (request->method)
     {
-        request->id = this->generateRequestId();
+    case EIoTMethod::SIGNAL:
+        MCB += (((request->path != NULL) ? IOT_MCB_PATH : 0));
+
+        bodyLengthSize = 1;
+        break;
+    case EIoTMethod::REQUEST:
+        MCB += ((IOT_MCB_ID) + ((request->path != NULL) ? IOT_MCB_PATH : 0));
+        break;
+    case EIoTMethod::RESPONSE:
+        MCB += ((IOT_MCB_ID));
+        break;
+    case EIoTMethod::STREAMING:
+        MCB += ((IOT_MCB_ID) + ((request->path != NULL) ? IOT_MCB_PATH : 0));
+
+        bodyLengthSize = 4;
+        break;
     }
 
-    bool shouldFreePath = false;
-    if (request->path == NULL)
+    /* Sum Total Data Length */
+
+    size_t dataLength = 2;
+
+    if (MCB & IOT_MCB_ID)
     {
-        request->path = static_cast<char *>(malloc(1 * sizeof(char) + 1));
-        request->path[0] = '/';
-        request->path[1] = '\0';
-        shouldFreePath = true;
+        if (request->id == 0)
+        {
+            request->id = this->generateRequestId();
+        }
+        dataLength += 2;
     }
-    size_t pathLength = strlen(request->path);
+
+    size_t pathLength = 0;
+    if (MCB & IOT_MCB_PATH)
+    {
+        pathLength = strlen(request->path);
+        dataLength += pathLength + 1 /* (EXT) */;
+    }
 
     String headers = "";
-    for (auto header = request->headers.begin(); header != request->headers.end(); ++header)
+    size_t headersLength = 0;
+    if (LCB & IOT_LCB_HEADER)
     {
-        headers += header->first + ":" + header->second + "\n";
-    }
-
-    size_t dataLength = 7 + pathLength + headers.length(); /* 1 + 1 + 1 + 2 + 1  (version+\n+method+id+\n) + pathLength + 1 (\n) + headers.length() */
-
-    if (request->body != NULL)
-    {
-        dataLength += 4 + request->bodyLength; /* 1 + 2 + 1 (BODY_CHAR+BODY_LENGTH\n) + request->bodyLength */
-    }
-
-    uint8_t data[dataLength + 1]; /* +1 (\0) */
-    data[0] = request->version;
-    data[1] = '\n';
-    data[2] = static_cast<uint8_t>((char)request->method);
-    data[3] = request->id >> 8;             /* Id as Big Endian - (MSB first) */
-    data[4] = request->id - (data[3] << 8); /* Id as Big Endian - (LSB last)  */
-    data[5] = '\n';
-
-    size_t nextIndex = 5;
-
-    for (size_t i = 0; i < pathLength; i++)
-    {
-        data[++nextIndex] = *(request->path + i);
-    }
-
-    data[++nextIndex] = '\n';
-
-    if (headers.length() > 0)
-    {
-        for (size_t i = 0; i < headers.length(); i++)
+        for (auto header = request->headers.begin(); header != request->headers.end(); ++header)
         {
-            data[++nextIndex] = (headers.charAt(i));
+            headersLength += header->first.length() + header->second.length() + 2; /* + 1 (RS) + 1 (EXT) */
+        }
+
+        dataLength += headersLength;
+    }
+
+    if (LCB & IOT_LCB_BODY)
+    {
+        dataLength += bodyLengthSize + request->bodyLength;
+    }
+
+    /* Record Data */
+
+    uint8_t data[dataLength + 1]; /* +1 => (\0) */
+    size_t nextIndex = 0;
+
+    data[nextIndex] = MCB;
+    data[++nextIndex] = LCB;
+
+    /* ID */
+    if (MCB & IOT_MCB_ID)
+    {
+        data[++nextIndex] = request->id >> 8;                     /* Id as Big Endian - (MSB first) */
+        data[++nextIndex] = request->id - (data[nextIndex] << 8); /* Id as Big Endian - (LSB last)  */
+    }
+
+    /* PATH */
+    if (MCB & IOT_MCB_PATH)
+    {
+        for (size_t i = 0; i < pathLength; i++)
+        {
+            data[++nextIndex] = *(request->path + i);
+        }
+        data[++nextIndex] = IOT_ETX;
+    }
+
+    /* HEADERs */
+    if (LCB & IOT_LCB_HEADER)
+    {
+        for (auto header = request->headers.begin(); header != request->headers.end(); ++header)
+        {
+            /* Key */
+            size_t keyLength = header->first.length();
+            for (size_t i = 0; i < keyLength; i++)
+            {
+                data[++nextIndex] = header->first.charAt(i);
+            }
+
+            /* RS */
+            data[++nextIndex] = IOT_RS;
+            
+            /* Value */
+            size_t valueLength = header->second.length();
+            for (size_t i = 0; i < valueLength; i++)
+            {
+                data[++nextIndex] = header->second.charAt(i);
+            }
+
+            /* EXT */
+            data[++nextIndex] = IOT_ETX;
         }
     }
 
-    if (request->body != NULL)
+    /* BODY */
+    if (LCB & IOT_LCB_BODY)
     {
-        data[++nextIndex] = 'B';
-        data[++nextIndex] = '\n';
-        data[++nextIndex] = request->bodyLength >> 8;                       /* Body Length as Big Endian - (MSB first) */
-        data[++nextIndex] = request->bodyLength - (data[(nextIndex)] << 8); /* Id as Big Endian - (LSB last)  */
+        switch (bodyLengthSize)
+        {
+        case 1: /* 0b00000000 */
+            data[++nextIndex] = request->bodyLength;
+            break;
+        case 4:                                            /* 0b00000000 00000000 00000000 00000000 */
+            data[++nextIndex] = request->bodyLength >> 24; /* Body Length as Big Endian - (MSB first) */
+            data[++nextIndex] = (request->bodyLength >> 16) & (255);
+            data[++nextIndex] = (request->bodyLength >> 8) & (255);
+            data[++nextIndex] = (request->bodyLength) & (255); /* Body Length as Big Endian - (LSB last)  */
+            break;
+        default:                                               /* 0b00000000 00000000 */
+            data[++nextIndex] = request->bodyLength >> 8;      /* Body Length as Big Endian - (MSB first) */
+            data[++nextIndex] = (request->bodyLength) & (255); /* Body Length as Big Endian - (LSB last)  */
+            break;
+        }
+
         for (size_t i = 0; i < request->bodyLength; i++)
         {
             data[++nextIndex] = *(request->body + i);
@@ -282,11 +373,6 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
 
     request->client->write(data, dataLength);
 
-    if (shouldFreePath)
-    {
-        free(request->path);
-    }
-
     return request;
 }
 
@@ -302,7 +388,7 @@ void IoTApp::loop()
     {
         uint8_t buffer[IOT_PROTOCOL_MAX_READ_LENGTH];
         int indexBuffer = 0;
-        while (client->available())
+        while (client->available() && indexBuffer < IOT_PROTOCOL_MAX_READ_LENGTH - 1)
         {
             buffer[indexBuffer] = client->read();
             indexBuffer++;

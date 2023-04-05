@@ -1,108 +1,135 @@
 # IoT Protocol
 
-IoT Protocol is a protocol over TCP based on HTTP for light data traffic.
+IoT Protocol is a protocol over TCP based on HTTP and MQTT for lightweight data traffic.
 
-**Motivation**: HTTP 1.1 (*http://*)  protocol uses too much data traffic for IoT context. Its request minimum size is 26 bytes (https://stackoverflow.com/a/25065027/1956719) and the HOST param is mandatory for all requests. 
+**Motivation**: 
+  1. HTTP 1.1 (*http://*) protocol is a request-response model is well-suited for web-based applications where clients need to request resources from servers and receive responses back. It is still more commonly used and more widely known among developers. But it uses too much data traffic for IoT context. Its minimum request size is 26 bytes (https://stackoverflow.com/a/25065027/1956719) and the HOST param is mandatory for all requests. 
 
-The IOT_PROTOCOL (*iot://*) is adapted for IoT context with light data traffic. Its request minimum size is 8 bytes withless to require HOST param for requests. 
+  2. MQTT (*mqtt://*) is a publish-subscribe messaging protocol, use lightweight data traffic. Its minimum request size is 2 bytes. But it is not stateless and does not provide a request/response pattern, so it isn't restful. MQTT is designed to be a lightweight protocol that minimizes network overhead, which can make it more challenging to handle large or complex data payloads.
+
+The **IOT PROTOCOL** (*iot://*) is base on HTTP and MQTT protocols. Is a request-response model adapted for IoT context designed for low-bandwidth, low-power devices. Its minimum request size is 2 bytes without requiring the HOST param for all requests. Supports Full Duplex and can be used for real-time communication up to 255 bytes, middleweight request up to (2^16 -1) bytes (~65Kb) and streaming up to (2^32 -1) bytes (~4.29Gb). Can use TLS/SSL encryption to secure their communications.
+
+
+IOT PROTOCOL uses middlewares and router's filtering features based on [express nodejs module](https://expressjs.com/) at its Layer Application. Yes, you can use `.use(middleware)`, `.use('/path/to/your/resource', router)`, `response.send(data)` methods to handle the requests.
+
+
+## Features
+
+  - Lightweight protocol that minimizes network overhead
+  - Minimum request size is 2 bytes
+  - Request-response model like HTTP protocol
+  - Adaptive requests methods for optimizing data length
+
+---
 
 ## Preamble Version 1
 
-```js
-VERSION \n
-METHOD + ID \n
-PATH \n
-[HEADERS \n]
-[BODY_CHAR + BODY_LENGTH \n BODY]
+```
+<MCB + LCB>
+[ID]
+[PATH + ETX]
+[HEADER + ETX]
+[BODY_LENGTH + BODY] 
 ```
 
-### SEPARATOR char
+> `<...>` REQUIRED
 
-SEPARATOR char serves to divide pieces of information
+> `[...]` OPTIONAL
+
+---
+### [0] **MCB**: MSB_CONTROL_BYTE
+
+The Most Significant Control Byte.  **REQUIRED**
+
+  * Size: `1 byte`
+  * Default: `0b00000100` = `4` = `0x4`
+
+| Name    | Description                                 | Bit 7 | Bit 6 | Bit 5 | Bit 4| Bit 3  | Bit 2 | Bit 1 | Bit 0 | Default     |
+| :---    | :---                                        | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---:       |
+| VERSION | Version of iot protocol                     | X     | X     | X     | X     | X     | X     |       |       | *0b*000001  |
+| ID      | Enable = 1 / Disable = 0 **ID**entification |       |       |       |       |       |       | X     |       | *0b*0       |
+| PATH    | Enable = 1 / Disable = 0 **PATH**           |       |       |       |       |       |       |       | X     | *0b*0       |
+
+#### Version:
+  - Range: `from 1 up to 63`. Zero is reserved.
+
+---
+### [1] **LCB**: LSB_CONTROL_BYTE
+
+The Least Significant Control Byte. **REQUIRED**
+  * Size: `1 byte`
+  * Default: `0b00000100` = `4` = `0x4`
+
+| Name      | Description                                 | Bit 7 | Bit 6 | Bit 5 | Bit 4| Bit 3  | Bit 2 | Bit 1 | Bit 0 | Default     |
+| :---      | :---                                        | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---:       |
+| METHOD    | Type of request                             | X     | X     | X     | X     | X     | X     |       |       | *0b*000001  |
+| HEADER    | Enable = 1 / Disable = 0 **HEADER**         |       |       |       |       |       |       | X     |       | *0b*0       |
+| BODY      | Enable = 1 / Disable = 0 **BODY**           |       |       |       |       |       |       |       | x     | *0b*0       |
+
+
+#### METHOD:
+
+  - Range: `from 1 up to 63`. Zero is reserved.
+
+Methods Types
+
+|Name                 | Description                     | MCB::ID   | MCB::PATH | LCB::METHOD | LCB::HEADER | LCB::BODY | BODY::LENGTH            | Minimum Total Length  |
+|:--                  | :--                             | :--:      | :--:      | :--:        | :--:      | :--:        | :--                     | :--:                  |
+| *Signal*            | Ligthweight signals like events | 0         | 0/1       | `0b000001`  | 0/1       | 0/1         | *up to 255 bytes*       | 2 bytes               |
+| *Request*           | Request that needs response     | 1         | 0/1       | `0b000010`  | 0/1       | 0/1         | *up to 65535 bytes*     | 4 bytes               |
+| *Response*          | Request's response              | 1         | 0         | `0b000011`  | 0/1       | 0/1         | *up to 65535 bytes*     | 4 bytes               |
+| *Streaming*         | Streaming data                  | 1         | 0/1       | `0b000100`  | 0/1       | 0/1         | *up to (2^32 -1) bytes* | 6 bytes               |
+
+
+---
+
+### ETX
+
+**ETX** byte serves to determine end of text
 
 * Type: `char` | `byte` | `uint8_t`
-* Size: 1 byte
+* Size: `1 byte`
 * Constant: 
-  * char: `\n`
-  * hex: `0xA`
-  * decimal: `10`
-  * binary: `0b1010`
+  * char: `ETX` [Unicode - *End Of Text*](https://www.compart.com/en/unicode/U+0003)
+  * hex: `0x3`
+  * decimal: `3`
+  * binary: `0b11`
 
-### [0] VERSION
+---
 
-Version is the version of iot protocol. Used for compatibility.
+### [2] **ID**: 
 
-Format: `VERSION + SEPARATOR`. **REQUIRED** | **SINGLE**
+Unsigned random number with up to 2^16 that identifies the request. **SINGLE**
 
-* Type: `byte` | `uint8_t`
-* Size: 1 byte
-* Example: 
-  * decimal: `1`
-  * hex: `0x1`
-  * binary: `0b00000001`
-
-### [1] METHOD+ID
-
-Method ID identifies the method of request and its id.
-
-Format: `METHOD + ID + SEPARATOR`. **REQUIRED** | **SINGLE**
-
-**METHOD**: 
-
-Method is the reason why the request is made. **REQUIRED**
-
-* Type: `char`. 
-* Size: 1 byte
-* Example: `R`
-
-* Methods types:
-  - *Signal*: method used to send signals like events
-    *  char: `S`
-    *  decimal: `131`
-    *  hex: `0x83`
-    *  binary: `0b10000011`
-
-  - *Request*: method used to do calls that needs a response
-    *  char: `R`
-    *  decimal: `130`
-    *  hex: `0x82`
-    *  binary: `0b10000010`
-
-  - *Response*: method used to responds a request
-    *  char: `r`
-    *  decimal: `114`
-    *  hex: `0x72`
-    *  binary: `0b1110010`
-
-**ID**: 
-
-Unsigned random number with up to 2^16 that identifies the request. **REQUIRED**
-
-* Type: `uint16_t` as Big Endian format. 
-* Size: 2 bytes
+* Type: `uint16_t` as Big Endian format 
+* Size: `2 bytes`
 * Example: 
     * decimal: `276`
     * uint_8[2]: `[ 1 , 20 ]`
     * binary: `0b00000001 00010100`
 
-### [2] PATH
+--- 
+### [3] **PATH**:
 
 The path component contains data, usually organized in hierarchical
 form, that, serves to identify a resource [URI > 3.3 Path](https://www.rfc-editor.org/info/rfc3986). 
 
-Format: `PATH + SEPARATOR`. **REQUIRED** | **SINGLE**
+Format: `PATH + ETX`. **SINGLE**
+
+#### **PATH**
 
 * Type: `string`
 * Example: `/foo/bar`
-* Default: `/`
+  
+---
 
-### [3] HEADERS
+### [4] **HEADERS**:
 
 Headers are be Key Value Pair that serves to set an attribute value for the request. Case sensitive.  
 
-Format: `HEADER + SEPARATOR`. **OPTIONAL** | **MULTIPLE**
+Format: `HEADER + EXT`. **MULTIPLE**
 
-**HEADER**
+#### **HEADER**
 
 * Type: `string`
 * Format: `KEY + KEY_VALUE_SEPARATOR + VALUE`
@@ -111,44 +138,49 @@ Format: `HEADER + SEPARATOR`. **OPTIONAL** | **MULTIPLE**
 * *VALUE*: 
   * Type: `string`
 * *KEY_VALUE_SEPARATOR*: 
-  * Constant:
-    *  char: `:`
-    *  decimal: `58`
-    *  hex: `0x3a`
-    *  binary: `0b00111010`
+  * Type: `char` | `byte` | `uint8_t`
+  * Size: `1 byte`
+  * Constant: 
+    * char: `RS` [Unicode - *Information Separator Two - RecordSeparator RS*](https://www.compart.com/en/unicode/U+001E)
+    * hex: `0x1E`
+    * decimal: `30`
+    * binary: `0b011110`
 * Example: 
-  * Single header: `foo:bar\n`
-  * Multiple headers: `foo:bar\nlorem:ipsum\n`
+  * Single header: `["foo", 0x1E, "bar", 0x3]`
+  * Multiple headers: `["foo", 0x1E, "bar", 0x3, "lorem", 0x1E, "ipsum", 0x3]`
 
-### [4] BODY
+
+------------------
+
+### [5] BODY
 
 The final data to be sent for request receiver. 
 
-Format: `BODY_CHAR + BODY_LENGTH+SEPARATOR + BODY`. **OPTIONAL** | **SINGLE**
+Format: `BODY_LENGTH + BODY`. **OPTIONAL** | **SINGLE**
 
-**BODY_CHAR**:
-
-Identifies the body part. **REQUIRED**
-
-  * Type: `char`
-  * Size: 1 byte
-  * Constant: 
-    * char: `B`
-    * hex: `0x42`
-    * decimal: `66`
-
-**BODY_LENGTH**: 
+#### **BODY_LENGTH**: 
 
 The body's length.  **REQUIRED**
 
-  * Type: `uint16_t` as Big Endian format
-  * Size: 2 bytes
-  * Example: 
-    * decimal: `2321`
-    * uint_8[2]: `[ 9 , 17 ]`
-    * binary: `0b00001001 00010001`
+  * Type: `uint8_t` | `uint16_t` | `uint32_t` as Big Endian format
+  * Size: `1 / 2 / 4 bytes.` *Depends on the applied method*
+  * Example:
+    * `uint8_t`
+      * decimal: `17`
+      * uint_8[1]: `[ 17 ]`
+      * binary: `0b00010001`
 
-**BODY**:
+    * `uint16_t`
+      * decimal: `2321`
+      * uint_8[2]: `[ 9 , 17 ]`
+      * binary: `0b00001001 00010001`
+
+    * `uint32_t`
+      * decimal: `67857`
+      * uint_8[4]: `[ 0, 1, 9 , 17 ]`
+      * binary: `0b00000000 00000001 00001001 00010001`
+
+#### **BODY**:
 
 The body / contents of request. **REQUIRED**
 
@@ -156,6 +188,8 @@ The body / contents of request. **REQUIRED**
 * Example:
   * String: `the message`
   * Buffer: `[ 116, 104, 101, 32, 109, 101, 115, 115, 97, 103, 101 ]`
+
+--- 
 
 ## Middlewares
 
@@ -175,3 +209,6 @@ The body / contents of request. **REQUIRED**
   
 - `URI` Berners-Lee, T. Fielding, R. L. Masinter "Uniform Resource Identifier (URI): Generic Syntax" STD 66 RFC 3986 DOI 10.17487/RFC3986 <https://www.rfc-editor.org/info/rfc3986>.
 
+- `UNICODE` Compart. Unicode Character <https://www.compart.com/en/unicode>
+
+- `MQTT` MQTT. MQTT 5 Specification <https://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html>
