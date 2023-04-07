@@ -21,13 +21,12 @@
 #define IOT_ETX 0x3
 #define IOT_RS 0x1E
 
-#define IOT_MCB_ID 0b00000010
-#define IOT_MCB_PATH 0b00000001
-#define IOT_LCB_HEADER 0b00000010
-#define IOT_LCB_BODY 0b00000001
+#define IOT_MSCB_ID 0b00000010
+#define IOT_MSCB_PATH 0b00000001
+#define IOT_LSCB_HEADER 0b00000010
+#define IOT_LSCB_BODY 0b00000001
 
-
-#define IOT_PROTOCOL_MAX_READ_LENGTH 1024
+#define IOT_PROTOCOL_BUFFER_SIZE 1024
 
 enum class EIoTMethod : uint8_t
 {
@@ -42,7 +41,7 @@ struct IoTRequest
     EIoTMethod method;
     uint16_t id;
     char *path;
-    std::map<String, String> headers;
+    std::map<char *, char *> headers;
     uint8_t *body;
     size_t bodyLength;
     Client *client;
@@ -50,11 +49,6 @@ struct IoTRequest
 
 typedef std::function<void(void)> Next;
 typedef void (*IoTMiddleware)(IoTRequest *, Next *);
-
-enum class EIoTRequestPart : char
-{
-    BODY = 'B',
-};
 
 typedef std::function<void(IoTRequest *response)> OnResponse;
 typedef std::function<void(IoTRequest *request)> OnTimeout;
@@ -76,7 +70,9 @@ private:
     std::map<uint16_t, IoTRequestResponse> requestResponse = std::map<uint16_t, IoTRequestResponse>();
 
 public:
-    IoTApp();
+    IoTApp(uint32_t delay = 300);
+    uint32_t delay = 300;
+
     std::vector<IoTMiddleware> middlewares;
 
     /* Common methods */
@@ -91,6 +87,7 @@ public:
 
     /* Helpers methods */
     void resetClients();
+    void readClient(Client *client);
     void loop();
 };
 

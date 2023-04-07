@@ -5,6 +5,6 @@
 
 #include "Arduino.h"
 
-int indexOf(uint8_t *buffer, size_t bufLen, char find, size_t start = (size_t)0);
+int indexOf(uint8_t *buffer, size_t bufLen, uint8_t value, size_t start = (size_t)0);
 
 #endif
