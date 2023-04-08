@@ -136,30 +136,38 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
             break;
         }
 
-        // 0 1 1 1 1 X X Y Y
         request.bodyLength = 0;
         for (uint8_t i = bodyLengthSize; i > 0; i--)
         {
             request.bodyLength += buffer[++offset] << ((i - 1) * 8);
         }
 
-        if ((bufLen - offset) >= request.bodyLength)
-        {
-            request.body = (uint8_t *)(malloc(request.bodyLength * sizeof(uint8_t) + 1));
-            memcpy(request.body, (buffer + (++offset)), request.bodyLength);
-            request.body[request.bodyLength] = '\0';
+        /* Single Request */
+        /* ...(17) EXT (18) 0 (19) 30 | (20) B (21) B (22) B + ...25B + (48) B , (49) B , (50) */
 
-            offset += request.bodyLength;
+        /* Multi Request */
+        /* ...(17) EXT (18) 4 (19) 36 | (20) B (21) B (22) B + ...999B + (1022) B , (1023) B , (1024) */
+        /* ...(17) EXT (18) 4 (19) 36 | (20) B (21) B (22) B + ...51B + (74) B , (75) B , (76) */
 
-            if (bufLen >= offset)
-            {
-                remainBuffer = (buffer + offset);
-                remainBufferSize = bufLen - (offset - 1);
-            }
-        }
-        else /* incomplete data */
+        offset++; //20 | 20
+        size_t bodyEndIndex = offset + request.bodyLength;
+        size_t bodyIncomeLength = (bufLen - offset); 
+
+        if (bodyIncomeLength > request.bodyLength) /* Income more than one request, so forward to next onData(remainBuffer) */
         {
+            remainBuffer = (buffer + bodyEndIndex);
+            remainBufferSize = bufLen - bodyEndIndex;
         }
+        else if (bodyIncomeLength < request.bodyLength)
+        { /* Part Body data */
+            bodyEndIndex = bufLen;
+        }
+
+        request.body = (uint8_t *)(malloc(bodyIncomeLength * sizeof(uint8_t) + 1));
+        memcpy(request.body, (buffer + offset), bodyIncomeLength);
+        request.body[bodyIncomeLength] = '\0';
+
+        offset = bodyEndIndex - 1;
     }
 
     /* Response */
@@ -360,22 +368,23 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
 
     std::function<size_t(size_t, size_t)> writeBodyPart = [&writeBodyPart, this, request, prefixDataIndex, &data](size_t i = 0, size_t parts = 0)
     {
-        size_t indexData = prefixDataIndex + 1; //42 
+        size_t indexData = prefixDataIndex + 1; // 42
         /* Body */
-        if (request->bodyLength > 0) //1060 > 0
+        if (request->bodyLength > 0) // 1060 > 0
         {
-            size_t bodyBufferRemain = (request->bodyLength - i);  //1984  //                                                                                                      
+            size_t bodyBufferRemain = (request->bodyLength - i);                                                                                                     // 1984  //
             size_t bodyUntilIndex = ((bodyBufferRemain + indexData) > IOT_PROTOCOL_BUFFER_SIZE) ? i + (IOT_PROTOCOL_BUFFER_SIZE - indexData) : i + bodyBufferRemain; // 1004 //1060
-            for (; i <= bodyUntilIndex; i++) //[0-1004] //[1005 - 1060]
+            for (; i <= bodyUntilIndex; i++)                                                                                                                         //[0-1004] //[1005 - 1060]
             {
-                //i = 1005 indexData = 21 ... i = 1060  indexData = 76
+                // i = 1005 indexData = 21 ... i = 1060  indexData = 76
                 *(data + (indexData++)) = *(request->body + i);
-                //i = 1006 indexData = 22 ... i = 1061  indexData = 77
+                // i = 1006 indexData = 22 ... i = 1061  indexData = 77
             }
+            i--;
         }
 
         *(data + (indexData)) = '\0';
-        request->client->write(data, indexData-1);
+        request->client->write(data, indexData - 1);
         request->client->flush();
         vTaskDelay(this->delay);
 
@@ -386,7 +395,7 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
         }
         else
         {
-            return writeBodyPart(i,parts);
+            return writeBodyPart(i, parts);
         }
     };
 
