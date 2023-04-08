@@ -44,6 +44,7 @@ struct IoTRequest
     std::map<char *, char *> headers;
     uint8_t *body;
     size_t bodyLength;
+    size_t parts;
     Client *client;
 };
 

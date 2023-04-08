@@ -1,7 +1,7 @@
 #include "iot_protocol.h"
 
-IoTApp::IoTApp(uint32_t delay = 300)
-{   
+IoTApp::IoTApp(uint32_t delay)
+{
     this->delay = delay;
 }
 
@@ -53,6 +53,7 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
         NULL,
         std::map<char *, char *>(),
         NULL,
+        0,
         0,
         client};
 
@@ -274,13 +275,23 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
         dataLength += headersLength;
     }
 
-    if((pathLength + headersLength) > IOT_PROTOCOL_BUFFER_SIZE - 8) {
+    if ((pathLength + headersLength) > IOT_PROTOCOL_BUFFER_SIZE - 8)
+    {
         throw "Path and Headers too big";
     }
 
     if (LSCB & IOT_LSCB_BODY)
     {
         dataLength += bodyLengthSize + request->bodyLength;
+    }
+    else
+    {
+        bodyLengthSize = 0;
+    }
+
+    if (dataLength > IOT_PROTOCOL_BUFFER_SIZE)
+    {
+        dataLength = IOT_PROTOCOL_BUFFER_SIZE;
     }
 
     /* Record Data */
@@ -343,14 +354,43 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
         {
             data[++nextIndex] = (request->bodyLength >> ((i - 1) * 8)) & 255;
         }
-        /* Body */
-        for (size_t i = 0; i < request->bodyLength; i++)
-        {
-            data[++nextIndex] = *(request->body + i);
-        }
     }
 
-    data[++nextIndex] = '\0';
+    size_t prefixDataIndex = nextIndex;
+
+    std::function<size_t(size_t, size_t)> writeBodyPart = [&writeBodyPart, this, request, prefixDataIndex, &data](size_t i = 0, size_t parts = 0)
+    {
+        size_t indexData = prefixDataIndex + 1; //42 
+        /* Body */
+        if (request->bodyLength > 0) //1060 > 0
+        {
+            size_t bodyBufferRemain = (request->bodyLength - i);  //1984  //                                                                                                      
+            size_t bodyUntilIndex = ((bodyBufferRemain + indexData) > IOT_PROTOCOL_BUFFER_SIZE) ? i + (IOT_PROTOCOL_BUFFER_SIZE - indexData) : i + bodyBufferRemain; // 1004 //1060
+            for (; i <= bodyUntilIndex; i++) //[0-1004] //[1005 - 1060]
+            {
+                //i = 1005 indexData = 21 ... i = 1060  indexData = 76
+                *(data + (indexData++)) = *(request->body + i);
+                //i = 1006 indexData = 22 ... i = 1061  indexData = 77
+            }
+        }
+
+        *(data + (indexData)) = '\0';
+        request->client->write(data, indexData-1);
+        request->client->flush();
+        vTaskDelay(this->delay);
+
+        parts++;
+        if (i >= request->bodyLength)
+        {
+            return parts;
+        }
+        else
+        {
+            return writeBodyPart(i,parts);
+        }
+    };
+
+    request->parts = writeBodyPart(0, 0);
 
     if (requestResponse != NULL)
     {
@@ -363,11 +403,6 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
 
         this->requestResponse.insert(std::make_pair(request->id, *requestResponse));
     }
-
-
-    vTaskDelay(this->delay);
-
-    request->client->write(data, dataLength);
 
     return request;
 }
@@ -396,7 +431,8 @@ void IoTApp::readClient(Client *client)
         this->onData(client, buffer, (bufferLength));
     }
 
-    if(bufferLength >= IOT_PROTOCOL_BUFFER_SIZE) {
+    if (bufferLength >= IOT_PROTOCOL_BUFFER_SIZE)
+    {
         return this->readClient(client);
     }
 }
