@@ -216,6 +216,11 @@ uint16_t IoTApp::generateRequestId()
     return id;
 }
 
+IoTRequest *IoTApp::signal(IoTRequest *request) {
+    request->method = EIoTMethod::SIGNAL;
+    return this->send(request, NULL);
+}
+
 IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestResponse)
 {
 
