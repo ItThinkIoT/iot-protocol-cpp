@@ -28,6 +28,8 @@
 
 #define IOT_PROTOCOL_BUFFER_SIZE 1024
 
+#define IOT_MULTIPART_TIMEOUT 5000
+
 enum class EIoTMethod : uint8_t
 {
     SIGNAL = 0x1,
@@ -44,6 +46,7 @@ struct IoTRequest
     std::map<char *, char *> headers;
     uint8_t *body;
     size_t bodyLength;
+    size_t totalBodyLength;
     size_t parts;
     Client *client;
 };
@@ -59,8 +62,14 @@ struct IoTRequestResponse
     OnTimeout *onTimeout;
 
     unsigned long timeout;
+    IoTRequest request; /* Just for timeout reference */
+};
 
-    IoTRequest request;
+struct IoTMultiPart
+{
+    uint32_t parts;    /* Number of Parts */
+    uint32_t received; /* Bytes received */
+    unsigned long timeout;
 };
 
 class IoTApp
@@ -69,10 +78,14 @@ private:
     std::vector<Client *> clients;
     void onData(Client *client, uint8_t *buffer, size_t bufLen);
     std::map<uint16_t, IoTRequestResponse> requestResponse = std::map<uint16_t, IoTRequestResponse>();
+    std::map<uint16_t, IoTMultiPart> multiPartControl = std::map<uint16_t, IoTMultiPart>();
+    uint8_t *remainBuffer = NULL; /* Reamins data on buffert o be processed */
+    size_t remainBufferLength = 0;
 
 public:
-    IoTApp(uint32_t delay = 300);
+    IoTApp(unsigned long timeout = 1000, uint32_t delay = 300);
     uint32_t delay = 300;
+    unsigned long timeout = 1000;
 
     std::vector<IoTMiddleware> middlewares;
 
@@ -83,10 +96,13 @@ public:
     uint16_t generateRequestId();
     IoTRequest *signal(IoTRequest *request);
     IoTRequest *request(IoTRequest *request, IoTRequestResponse *requestResponse);
-    IoTRequest *response(IoTRequest *request, uint8_t *body);
+    IoTRequest *response(IoTRequest *request);
+    IoTRequest *streaming(IoTRequest *request, IoTRequestResponse *requestResponse);
     IoTRequest *send(IoTRequest *request, IoTRequestResponse *requestResponse);
+    void resetRemainBuffer();
 
-    /* Helpers methods */
+    /* Helper methods */
+    void freeRequest(IoTRequest *request);
     void resetClients();
     void readClient(Client *client);
     void loop();

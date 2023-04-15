@@ -1,7 +1,8 @@
 #include "iot_protocol.h"
 
-IoTApp::IoTApp(uint32_t delay)
+IoTApp::IoTApp(unsigned long timeout, uint32_t delay)
 {
+    this->timeout = timeout;
     this->delay = delay;
 }
 
@@ -23,19 +24,6 @@ void IoTApp::runMiddleware(IoTRequest *request, int index = 0)
     };
 
     this->middlewares.at(index)(request, &_next);
-
-    /* If is the last middleware */
-    if (index == this->middlewares.size() - 1)
-    {
-        /* Free memory */
-        free(request->path);
-        free(request->body);
-        for (auto header = request->headers.begin(); header != request->headers.end(); header++)
-        {
-            free(header->first);
-            free(header->second);
-        }
-    }
 }
 
 void IoTApp::listen(Client *client)
@@ -53,6 +41,7 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
         NULL,
         std::map<char *, char *>(),
         NULL,
+        0,
         0,
         0,
         client};
@@ -96,7 +85,11 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
         int indexRS = -1;
         int indexEXT = -1;
 
-        while ((indexRS = indexOf(buffer, bufLen, IOT_RS, offset)) && ((indexEXT = indexOf(buffer, bufLen, IOT_ETX, offset + 1)) != -1) && indexRS < indexEXT - 1)
+        uint8_t headerSize = buffer[offset++];
+
+        while ((indexRS = indexOf(buffer, bufLen, IOT_RS, offset)) &&
+               ((indexEXT = indexOf(buffer, bufLen, IOT_ETX, offset + 1)) != -1) &&
+               indexRS < indexEXT - 1)
         {
             size_t keyLength = (indexRS - offset);
 
@@ -113,18 +106,21 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
             request.headers.insert(std::make_pair(headerKey, headerValue));
 
             offset = indexEXT + 1;
+
+            if (request.headers.size() == headerSize)
+            {
+                break;
+            }
         }
 
         offset--;
     }
 
     /* BODY */
-    uint8_t *remainBuffer = NULL; /* Reamins data on buffe rto be processed */
-    size_t remainBufferSize = 0;
+    bool requestCompleted = true;
 
     if (LSCB & IOT_LSCB_BODY)
     {
-
         uint8_t bodyLengthSize = 2;
         switch (request.method)
         {
@@ -141,6 +137,7 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
         {
             request.bodyLength += buffer[++offset] << ((i - 1) * 8);
         }
+        request.totalBodyLength = request.bodyLength;
 
         /* Single Request */
         /* ...(17) EXT (18) 0 (19) 30 | (20) B (21) B (22) B + ...25B + (48) B , (49) B , (50) */
@@ -149,60 +146,88 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
         /* ...(17) EXT (18) 4 (19) 36 | (20) B (21) B (22) B + ...999B + (1022) B , (1023) B , (1024) */
         /* ...(17) EXT (18) 4 (19) 36 | (20) B (21) B (22) B + ...51B + (74) B , (75) B , (76) */
 
-        offset++; //20 | 20
-        size_t bodyEndIndex = offset + request.bodyLength;
-        size_t bodyIncomeLength = (bufLen - offset); 
+        offset++;
 
-        if (bodyIncomeLength > request.bodyLength) /* Income more than one request, so forward to next onData(remainBuffer) */
+        size_t bodyIncomeLength = bufLen - offset;
+        size_t bodyEndIndex = offset + request.bodyLength;
+
+        auto multiPartControl = this->multiPartControl.find(request.id);
+        if ((multiPartControl != this->multiPartControl.end()))
         {
-            remainBuffer = (buffer + bodyEndIndex);
-            remainBufferSize = bufLen - bodyEndIndex;
+            bodyEndIndex -= multiPartControl->second.received;
         }
-        else if (bodyIncomeLength < request.bodyLength)
-        { /* Part Body data */
+        else
+        {
+            IoTMultiPart multiPart = {
+                0,
+                0,
+                millis()};
+
+            this->multiPartControl.insert(std::make_pair(request.id, multiPart));
+            multiPartControl = this->multiPartControl.find(request.id);
+        }
+
+        if (bodyEndIndex > bufLen)
+        {
             bodyEndIndex = bufLen;
         }
 
-        request.body = (uint8_t *)(malloc(bodyIncomeLength * sizeof(uint8_t) + 1));
-        memcpy(request.body, (buffer + offset), bodyIncomeLength);
-        request.body[bodyIncomeLength] = '\0';
+        request.bodyLength = bodyEndIndex - offset;
+
+        multiPartControl->second.parts++;
+        multiPartControl->second.received += request.bodyLength;
+        multiPartControl->second.timeout += IOT_MULTIPART_TIMEOUT;
+
+        if (multiPartControl->second.received < request.totalBodyLength)
+        {
+            requestCompleted = false;
+        }
+        else
+        {
+            this->multiPartControl.erase(request.id);
+        }
+
+        if (bodyIncomeLength > request.bodyLength) /* Income more than one request, so keeps it on remainBuffer */
+        {
+            this->remainBufferLength = bufLen - bodyEndIndex;
+            this->remainBuffer = (uint8_t *)(malloc(remainBufferLength * sizeof(uint8_t) + 1));
+            memcpy(this->remainBuffer, (buffer + bodyEndIndex), this->remainBufferLength);
+            this->remainBuffer[this->remainBufferLength] = '\0';
+        }
+
+        request.body = (uint8_t *)(malloc((request.bodyLength) * sizeof(uint8_t) + 1));
+        memcpy(request.body, (buffer + offset), request.bodyLength);
+        request.body[request.bodyLength] = '\0';
 
         offset = bodyEndIndex - 1;
     }
 
-    /* Response */
-    if (request.method == EIoTMethod::RESPONSE)
+    /* Request Response */
+    auto rr = this->requestResponse.find(request.id);
+    if (rr != this->requestResponse.end())
     {
-        auto rr = this->requestResponse.find(request.id);
-        if (rr != this->requestResponse.end())
+        if (rr->second.onResponse != NULL)
         {
-            if (rr->second.onResponse != NULL)
-            {
-                (*(rr->second.onResponse))(&request);
-                // (rr->second.onResponse)(&request);
+            (*(rr->second.onResponse))(&request);
+        }
 
-                /* Free Request */
-                free(request.path);
-                free(request.body);
-                for (auto header = request.headers.begin(); header != request.headers.end(); header++)
-                {
-                    free(header->first);
-                    free(header->second);
-                }
-            }
+        if (requestCompleted)
+        {
             this->requestResponse.erase(request.id);
+        } else {
+            rr->second.timeout += this->timeout;
         }
     }
     else
     {
-        /* Middleware */
-        this->runMiddleware(&request);
+        if (request.method != EIoTMethod::RESPONSE)
+        {
+            /* Middleware */
+            this->runMiddleware(&request);
+        }
     }
 
-    if (remainBuffer != NULL)
-    {
-        this->onData(client, remainBuffer, remainBufferSize);
-    }
+    this->freeRequest(&request);
 }
 
 uint16_t IoTApp::generateRequestId()
@@ -216,9 +241,28 @@ uint16_t IoTApp::generateRequestId()
     return id;
 }
 
-IoTRequest *IoTApp::signal(IoTRequest *request) {
+IoTRequest *IoTApp::signal(IoTRequest *request)
+{
     request->method = EIoTMethod::SIGNAL;
     return this->send(request, NULL);
+}
+
+IoTRequest *IoTApp::request(IoTRequest *request, IoTRequestResponse *requestResponse)
+{
+    request->method = EIoTMethod::REQUEST;
+    return this->send(request, requestResponse);
+}
+
+IoTRequest *IoTApp::response(IoTRequest *request)
+{
+    request->method = EIoTMethod::RESPONSE;
+    return this->send(request, NULL);
+}
+
+IoTRequest *IoTApp::streaming(IoTRequest *request, IoTRequestResponse *requestResponse)
+{
+    request->method = EIoTMethod::STREAMING;
+    return this->send(request, requestResponse);
 }
 
 IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestResponse)
@@ -278,19 +322,19 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
 
     String headers = "";
     size_t headersLength = 0;
+    uint8_t headerSize = request->headers.size() & 255;
     if (LSCB & IOT_LSCB_HEADER)
     {
         for (auto header = request->headers.begin(); header != request->headers.end(); ++header)
         {
             headersLength += strlen(header->first) + strlen(header->second) + 2; /* + 1 (RS) + 1 (EXT) */
         }
-
-        dataLength += headersLength;
+        dataLength += headersLength + 1; /* +1 (headerSize) */
     }
 
     if ((pathLength + headersLength) > IOT_PROTOCOL_BUFFER_SIZE - 8)
     {
-        throw "Path and Headers too big";
+        throw "Path and Headers too big.";
     }
 
     if (LSCB & IOT_LSCB_BODY)
@@ -318,8 +362,8 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
     /* ID */
     if (MSCB & IOT_MSCB_ID)
     {
-        data[++nextIndex] = request->id >> 8;                     /* Id as Big Endian - (MSB first) */
-        data[++nextIndex] = request->id - (data[nextIndex] << 8); /* Id as Big Endian - (LSB last)  */
+        data[++nextIndex] = request->id >> 8;  /* Id as Big Endian - (MSB first) */
+        data[++nextIndex] = request->id & 255; /* Id as Big Endian - (LSB last)  */
     }
 
     /* PATH */
@@ -335,6 +379,8 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
     /* HEADERs */
     if (LSCB & IOT_LSCB_HEADER)
     {
+        data[++nextIndex] = headerSize;
+
         for (auto header = request->headers.begin(); header != request->headers.end(); ++header)
         {
             /* Key */
@@ -377,21 +423,16 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
         /* Body */
         if (request->bodyLength > 0) // 1060 > 0
         {
-            size_t bodyBufferRemain = (request->bodyLength - i);                                                                                                     // 1984  //
-            size_t bodyUntilIndex = ((bodyBufferRemain + indexData) > IOT_PROTOCOL_BUFFER_SIZE) ? i + (IOT_PROTOCOL_BUFFER_SIZE - indexData) : i + bodyBufferRemain; // 1004 //1060
-            for (; i <= bodyUntilIndex; i++)                                                                                                                         //[0-1004] //[1005 - 1060]
+            size_t bodyBufferRemain = (request->bodyLength - i);
+            size_t bodyUntilIndex = ((bodyBufferRemain + indexData) > IOT_PROTOCOL_BUFFER_SIZE) ? i + (IOT_PROTOCOL_BUFFER_SIZE - indexData) : i + bodyBufferRemain;
+            for (; i < bodyUntilIndex; i++)
             {
-                // i = 1005 indexData = 21 ... i = 1060  indexData = 76
                 *(data + (indexData++)) = *(request->body + i);
-                // i = 1006 indexData = 22 ... i = 1061  indexData = 77
             }
-            i--;
         }
 
         *(data + (indexData)) = '\0';
-        request->client->write(data, indexData - 1);
-        request->client->flush();
-        vTaskDelay(this->delay);
+        request->client->write(data, indexData);
 
         parts++;
         if (i >= request->bodyLength)
@@ -410,7 +451,7 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
     {
         if (requestResponse->timeout == 0)
         {
-            requestResponse->timeout = 1000;
+            requestResponse->timeout = this->timeout;
         }
         requestResponse->timeout += millis();
         requestResponse->request = *request;
@@ -418,13 +459,39 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
         this->requestResponse.insert(std::make_pair(request->id, *requestResponse));
     }
 
+    this->readClient(request->client);
+
     return request;
+}
+
+void IoTApp::resetRemainBuffer()
+{
+    this->remainBufferLength = 0;
+    if (this->remainBuffer != NULL)
+    {
+        free(this->remainBuffer);
+    }
+    this->remainBuffer = NULL;
+}
+
+void IoTApp::freeRequest(IoTRequest *request)
+{
+    /* Free Request */
+    free(request->path);
+    free(request->body);
+    for (auto header = request->headers.begin(); header != request->headers.end(); header++)
+    {
+        free(header->first);
+        free(header->second);
+    }
 }
 
 void IoTApp::resetClients()
 {
     this->clients.clear();
+    this->resetRemainBuffer();
 }
+
 
 void IoTApp::readClient(Client *client)
 {
@@ -434,6 +501,17 @@ void IoTApp::readClient(Client *client)
     }
     uint8_t buffer[IOT_PROTOCOL_BUFFER_SIZE + 1];
     size_t bufferLength = 0;
+
+    if (this->remainBuffer != NULL)
+    {
+        for (uint32_t i = 0; i < this->remainBufferLength; i++)
+        {
+            buffer[bufferLength++] = *(this->remainBuffer + i);
+        }
+
+        this->resetRemainBuffer();
+    }
+
     while (client->available() && bufferLength < IOT_PROTOCOL_BUFFER_SIZE)
     {
         buffer[bufferLength++] = client->read();
@@ -443,11 +521,6 @@ void IoTApp::readClient(Client *client)
     {
         buffer[bufferLength] = '\0';
         this->onData(client, buffer, (bufferLength));
-    }
-
-    if (bufferLength >= IOT_PROTOCOL_BUFFER_SIZE)
-    {
-        return this->readClient(client);
     }
 }
 
@@ -470,6 +543,17 @@ void IoTApp::loop()
             (*onTimeout)(&(rr->second.request));
 
             this->requestResponse.erase(rr->second.request.id);
+            continue;
+        }
+    }
+
+    /* MultiPart Timeout */
+    for (auto mpc = this->multiPartControl.begin(); mpc != this->multiPartControl.end(); ++mpc)
+    {
+        unsigned long timeout = mpc->second.timeout;
+        if (now >= timeout)
+        {
+            this->requestResponse.erase(mpc->first);
             continue;
         }
     }
