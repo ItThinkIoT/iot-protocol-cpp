@@ -72,7 +72,7 @@ struct IoTMultiPart
     unsigned long timeout;
 };
 
-class IoTApp
+class IoTProtocol
 {
 private:
     std::vector<Client *> clients;
@@ -83,7 +83,7 @@ private:
     size_t remainBufferLength = 0;
 
 public:
-    IoTApp(unsigned long timeout = 1000, uint32_t delay = 300);
+    IoTProtocol(unsigned long timeout = 1000, uint32_t delay = 300);
     uint32_t delay = 300;
     unsigned long timeout = 1000;
 

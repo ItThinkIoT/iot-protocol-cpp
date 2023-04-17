@@ -1,17 +1,17 @@
 #include "iot_protocol.h"
 
-IoTApp::IoTApp(unsigned long timeout, uint32_t delay)
+IoTProtocol::IoTProtocol(unsigned long timeout, uint32_t delay)
 {
     this->timeout = timeout;
     this->delay = delay;
 }
 
-void IoTApp::use(IoTMiddleware middleware)
+void IoTProtocol::use(IoTMiddleware middleware)
 {
     this->middlewares.push_back(middleware);
 }
 
-void IoTApp::runMiddleware(IoTRequest *request, int index = 0)
+void IoTProtocol::runMiddleware(IoTRequest *request, int index = 0)
 {
     if (index >= this->middlewares.size())
     {
@@ -26,12 +26,12 @@ void IoTApp::runMiddleware(IoTRequest *request, int index = 0)
     this->middlewares.at(index)(request, &_next);
 }
 
-void IoTApp::listen(Client *client)
+void IoTProtocol::listen(Client *client)
 {
     this->clients.push_back(client);
 }
 
-void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
+void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
 {
 
     IoTRequest request = {
@@ -230,7 +230,7 @@ void IoTApp::onData(Client *client, uint8_t *buffer, size_t bufLen)
     this->freeRequest(&request);
 }
 
-uint16_t IoTApp::generateRequestId()
+uint16_t IoTProtocol::generateRequestId()
 {
     vTaskDelay(1);
     uint16_t id = (uint16_t)(millis() % 10000);
@@ -241,31 +241,31 @@ uint16_t IoTApp::generateRequestId()
     return id;
 }
 
-IoTRequest *IoTApp::signal(IoTRequest *request)
+IoTRequest *IoTProtocol::signal(IoTRequest *request)
 {
     request->method = EIoTMethod::SIGNAL;
     return this->send(request, NULL);
 }
 
-IoTRequest *IoTApp::request(IoTRequest *request, IoTRequestResponse *requestResponse)
+IoTRequest *IoTProtocol::request(IoTRequest *request, IoTRequestResponse *requestResponse)
 {
     request->method = EIoTMethod::REQUEST;
     return this->send(request, requestResponse);
 }
 
-IoTRequest *IoTApp::response(IoTRequest *request)
+IoTRequest *IoTProtocol::response(IoTRequest *request)
 {
     request->method = EIoTMethod::RESPONSE;
     return this->send(request, NULL);
 }
 
-IoTRequest *IoTApp::streaming(IoTRequest *request, IoTRequestResponse *requestResponse)
+IoTRequest *IoTProtocol::streaming(IoTRequest *request, IoTRequestResponse *requestResponse)
 {
     request->method = EIoTMethod::STREAMING;
     return this->send(request, requestResponse);
 }
 
-IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestResponse)
+IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestResponse)
 {
 
     if (request->version == 0)
@@ -464,7 +464,7 @@ IoTRequest *IoTApp::send(IoTRequest *request, IoTRequestResponse *requestRespons
     return request;
 }
 
-void IoTApp::resetRemainBuffer()
+void IoTProtocol::resetRemainBuffer()
 {
     this->remainBufferLength = 0;
     if (this->remainBuffer != NULL)
@@ -474,7 +474,7 @@ void IoTApp::resetRemainBuffer()
     this->remainBuffer = NULL;
 }
 
-void IoTApp::freeRequest(IoTRequest *request)
+void IoTProtocol::freeRequest(IoTRequest *request)
 {
     /* Free Request */
     free(request->path);
@@ -486,14 +486,14 @@ void IoTApp::freeRequest(IoTRequest *request)
     }
 }
 
-void IoTApp::resetClients()
+void IoTProtocol::resetClients()
 {
     this->clients.clear();
     this->resetRemainBuffer();
 }
 
 
-void IoTApp::readClient(Client *client)
+void IoTProtocol::readClient(Client *client)
 {
     if (!(client->connected()))
     {
@@ -524,7 +524,7 @@ void IoTApp::readClient(Client *client)
     }
 }
 
-void IoTApp::loop()
+void IoTProtocol::loop()
 {
     /* Read Clients */
     for (auto client : this->clients)
