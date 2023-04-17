@@ -214,7 +214,9 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
         if (requestCompleted)
         {
             this->requestResponse.erase(request.id);
-        } else {
+        }
+        else
+        {
             rr->second.timeout += this->timeout;
         }
     }
@@ -492,7 +494,6 @@ void IoTProtocol::resetClients()
     this->resetRemainBuffer();
 }
 
-
 void IoTProtocol::readClient(Client *client)
 {
     if (!(client->connected()))
@@ -540,7 +541,10 @@ void IoTProtocol::loop()
         if (now >= timeout)
         {
             OnTimeout *onTimeout = rr->second.onTimeout;
-            (*onTimeout)(&(rr->second.request));
+            if (onTimeout != NULL)
+            {
+                (*onTimeout)(&(rr->second.request));
+            }
 
             this->requestResponse.erase(rr->second.request.id);
             continue;
