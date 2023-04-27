@@ -4,6 +4,13 @@ IoTProtocol::IoTProtocol(unsigned long timeout, uint32_t delay)
 {
     this->timeout = timeout;
     this->delay = delay;
+
+    this->onAliveRequestTimeout = [this](IoTRequest *request)
+    {
+        /* Close client */
+        request->iotClient->client->stop();
+        this->clients.erase(request->iotClient->client);
+    };
 }
 
 void IoTProtocol::use(IoTMiddleware middleware)
@@ -26,12 +33,28 @@ void IoTProtocol::runMiddleware(IoTRequest *request, int index = 0)
     this->middlewares.at(index)(request, &_next);
 }
 
-void IoTProtocol::listen(Client *client)
+void IoTProtocol::listen(IoTClient *iotClient)
 {
-    this->clients.push_back(client);
+    if (iotClient->client == NULL)
+    {
+        throw "[IoTProtocol] Client of IoTClient is null";
+    }
+
+    iotClient->requestResponse = std::map<uint16_t, IoTRequestResponse>();
+    iotClient->multiPartControl = std::map<uint16_t, IoTMultiPart>();
+    iotClient->remainBuffer = NULL;
+    iotClient->remainBufferLength = 0;
+    iotClient->lockedForWrite = false;
+    if (iotClient->aliveInterval == 0)
+    {
+        iotClient->aliveInterval = 60;
+    }
+    iotClient->aliveNextRequest = (millis() + (iotClient->aliveInterval * 1000));
+
+    this->clients.insert(std::make_pair(iotClient->client, iotClient));
 }
 
-void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
+void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
 {
 
     IoTRequest request = {
@@ -44,7 +67,7 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
         0,
         0,
         0,
-        client};
+        iotClient};
 
     size_t offset = 0;
 
@@ -56,6 +79,43 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
 
     request.version = MSCB >> 2;
     request.method = (EIoTMethod)(LSCB >> 2);
+
+    /* Alive Method */
+    if (request.method == EIoTMethod::ALIVE_REQUEST)
+    {
+        /* Repond the alive Request  */
+        IoTRequest aliveResponse = {
+            IOT_VERSION,
+            EIoTMethod::ALIVE_REQUEST,
+            0,
+            NULL,
+            std::map<char *, char *>(),
+            NULL,
+            0,
+            0,
+            0,
+            iotClient};
+        this->aliveRespond(&aliveResponse);
+
+        /* Cancel next alive request and schedule another one from now */
+        iotClient->aliveNextRequest = millis() + (iotClient->aliveInterval * 1000);
+
+        return this->freeRequest(&request);
+    }
+    if (request.method == EIoTMethod::ALIVE_RESPOND)
+    {
+        /* Cancel timeout */
+        for (auto rr = iotClient->requestResponse.begin(); rr != iotClient->requestResponse.end(); ++rr)
+        {
+            if (rr->second.request.method != EIoTMethod::ALIVE_REQUEST)
+            {
+                continue;
+            }
+
+            iotClient->requestResponse.erase(rr);
+        }
+        return this->freeRequest(&request);
+    }
 
     /* ID */
     if (MSCB & IOT_MSCB_ID && bufLen >= offset + 2)
@@ -151,8 +211,8 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
         size_t bodyIncomeLength = bufLen - offset;
         size_t bodyEndIndex = offset + request.bodyLength;
 
-        auto multiPartControl = this->multiPartControl.find(request.id);
-        if ((multiPartControl != this->multiPartControl.end()))
+        auto multiPartControl = iotClient->multiPartControl.find(request.id);
+        if ((multiPartControl != iotClient->multiPartControl.end()))
         {
             bodyEndIndex -= multiPartControl->second.received;
         }
@@ -163,8 +223,8 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
                 0,
                 millis()};
 
-            this->multiPartControl.insert(std::make_pair(request.id, multiPart));
-            multiPartControl = this->multiPartControl.find(request.id);
+            iotClient->multiPartControl.insert(std::make_pair(request.id, multiPart));
+            multiPartControl = iotClient->multiPartControl.find(request.id);
         }
 
         if (bodyEndIndex > bufLen)
@@ -184,15 +244,15 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
         }
         else
         {
-            this->multiPartControl.erase(request.id);
+            iotClient->multiPartControl.erase(request.id);
         }
 
         if (bodyIncomeLength > request.bodyLength) /* Income more than one request, so keeps it on remainBuffer */
         {
-            this->remainBufferLength = bufLen - bodyEndIndex;
-            this->remainBuffer = (uint8_t *)(malloc(remainBufferLength * sizeof(uint8_t) + 1));
-            memcpy(this->remainBuffer, (buffer + bodyEndIndex), this->remainBufferLength);
-            this->remainBuffer[this->remainBufferLength] = '\0';
+            iotClient->remainBufferLength = bufLen - bodyEndIndex;
+            iotClient->remainBuffer = (uint8_t *)(malloc(iotClient->remainBufferLength * sizeof(uint8_t) + 1));
+            memcpy(iotClient->remainBuffer, (buffer + bodyEndIndex), iotClient->remainBufferLength);
+            iotClient->remainBuffer[iotClient->remainBufferLength] = '\0';
         }
 
         request.body = (uint8_t *)(malloc((request.bodyLength) * sizeof(uint8_t) + 1));
@@ -203,8 +263,8 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
     }
 
     /* Request Response */
-    auto rr = this->requestResponse.find(request.id);
-    if (rr != this->requestResponse.end())
+    auto rr = iotClient->requestResponse.find(request.id);
+    if (rr != iotClient->requestResponse.end())
     {
         if (rr->second.onResponse != NULL)
         {
@@ -213,7 +273,7 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
 
         if (requestCompleted)
         {
-            this->requestResponse.erase(request.id);
+            iotClient->requestResponse.erase(request.id);
         }
         else
         {
@@ -232,15 +292,37 @@ void IoTProtocol::onData(Client *client, uint8_t *buffer, size_t bufLen)
     this->freeRequest(&request);
 }
 
-uint16_t IoTProtocol::generateRequestId()
+uint16_t IoTProtocol::generateRequestId(IoTClient *iotClient)
 {
     vTaskDelay(1);
     uint16_t id = (uint16_t)(millis() % 10000);
-    if (this->requestResponse.find(id) != this->requestResponse.end() || id == 0)
+    if (iotClient->requestResponse.find(id) != iotClient->requestResponse.end() || id == 0)
     {
-        return this->generateRequestId();
+        return this->generateRequestId(iotClient);
     }
     return id;
+}
+
+IoTRequest *IoTProtocol::aliveRequest(IoTRequest *request, IoTRequestResponse *requestResponse)
+{
+    request->method = EIoTMethod::ALIVE_REQUEST;
+    request->id = 0;
+    freeRequest(request);
+    request->bodyLength = 0;
+    request->totalBodyLength = 0;
+    request->parts = 0;
+    return this->send(request, requestResponse);
+}
+
+IoTRequest *IoTProtocol::aliveRespond(IoTRequest *request)
+{
+    request->method = EIoTMethod::ALIVE_RESPOND;
+    request->id = 0;
+    freeRequest(request);
+    request->bodyLength = 0;
+    request->totalBodyLength = 0;
+    request->parts = 0;
+    return this->send(request, NULL);
 }
 
 IoTRequest *IoTProtocol::signal(IoTRequest *request)
@@ -300,6 +382,10 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
 
         bodyLengthSize = 4;
         break;
+    case EIoTMethod::ALIVE_REQUEST:
+    case EIoTMethod::ALIVE_RESPOND:
+        bodyLengthSize = 0;
+        break;
     }
 
     /* Sum Total Data Length */
@@ -310,7 +396,7 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
     {
         if (request->id == 0)
         {
-            request->id = this->generateRequestId();
+            request->id = this->generateRequestId(request->iotClient);
         }
         dataLength += 2;
     }
@@ -336,7 +422,7 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
 
     if ((pathLength + headersLength) > IOT_PROTOCOL_BUFFER_SIZE - 8)
     {
-        throw "Path and Headers too big.";
+        throw "[IoTProtocol] Path and Headers too big.";
     }
 
     if (LSCB & IOT_LSCB_BODY)
@@ -434,7 +520,7 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
         }
 
         *(data + (indexData)) = '\0';
-        request->client->write(data, indexData);
+        request->iotClient->client->write(data, indexData);
 
         parts++;
         if (i >= request->bodyLength)
@@ -447,7 +533,13 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
         }
     };
 
+    while (request->iotClient->lockedForWrite)
+    {
+        vTaskDelay(300);
+    }
+    request->iotClient->lockedForWrite = true;
     request->parts = writeBodyPart(0, 0);
+    request->iotClient->lockedForWrite = false;
 
     if (requestResponse != NULL)
     {
@@ -458,22 +550,22 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
         requestResponse->timeout += millis();
         requestResponse->request = *request;
 
-        this->requestResponse.insert(std::make_pair(request->id, *requestResponse));
+        request->iotClient->requestResponse.insert(std::make_pair(request->id, *requestResponse));
     }
 
-    this->readClient(request->client);
+    this->readClient(request->iotClient);
 
     return request;
 }
 
-void IoTProtocol::resetRemainBuffer()
+void IoTProtocol::resetRemainBuffer(IoTClient *iotClient)
 {
-    this->remainBufferLength = 0;
-    if (this->remainBuffer != NULL)
+    iotClient->remainBufferLength = 0;
+    if (iotClient->remainBuffer != NULL)
     {
-        free(this->remainBuffer);
+        free(iotClient->remainBuffer);
     }
-    this->remainBuffer = NULL;
+    iotClient->remainBuffer = NULL;
 }
 
 void IoTProtocol::freeRequest(IoTRequest *request)
@@ -490,75 +582,109 @@ void IoTProtocol::freeRequest(IoTRequest *request)
 
 void IoTProtocol::resetClients()
 {
+    for (auto client = this->clients.begin(); client != this->clients.end(); ++client)
+    {
+        this->resetRemainBuffer(client->second);
+    }
+
     this->clients.clear();
-    this->resetRemainBuffer();
 }
 
-void IoTProtocol::readClient(Client *client)
+void IoTProtocol::readClient(IoTClient *iotClient)
 {
-    if (!(client->connected()))
+    if (!(iotClient->client->connected()))
     {
         return;
     }
     uint8_t buffer[IOT_PROTOCOL_BUFFER_SIZE + 1];
     size_t bufferLength = 0;
 
-    if (this->remainBuffer != NULL)
+    if (iotClient->remainBuffer != NULL)
     {
-        for (uint32_t i = 0; i < this->remainBufferLength; i++)
+        for (uint32_t i = 0; i < iotClient->remainBufferLength; i++)
         {
-            buffer[bufferLength++] = *(this->remainBuffer + i);
+            buffer[bufferLength++] = *(iotClient->remainBuffer + i);
         }
 
-        this->resetRemainBuffer();
+        this->resetRemainBuffer(iotClient);
     }
 
-    while (client->available() && bufferLength < IOT_PROTOCOL_BUFFER_SIZE)
+    while (iotClient->client->available() && bufferLength < IOT_PROTOCOL_BUFFER_SIZE)
     {
-        buffer[bufferLength++] = client->read();
+        buffer[bufferLength++] = iotClient->client->read();
     }
 
     if (bufferLength > 0)
     {
         buffer[bufferLength] = '\0';
-        this->onData(client, buffer, (bufferLength));
+        this->onData(iotClient, buffer, (bufferLength));
     }
 }
 
 void IoTProtocol::loop()
 {
-    /* Read Clients */
-    for (auto client : this->clients)
-    {
-        this->readClient(client);
-    }
-
-    /* Timeout */
     unsigned long now = millis();
-    for (auto rr = this->requestResponse.begin(); rr != this->requestResponse.end(); ++rr)
-    {
-        unsigned long timeout = rr->second.timeout;
-        if (now >= timeout)
-        {
-            OnTimeout *onTimeout = rr->second.onTimeout;
-            if (onTimeout != NULL)
-            {
-                (*onTimeout)(&(rr->second.request));
-            }
 
-            this->requestResponse.erase(rr->second.request.id);
-            continue;
+    /* Read Clients */
+    for (auto client = this->clients.begin(); client != this->clients.end(); ++client)
+    {
+        this->readClient(client->second);
+
+        /* Alive Request */
+        if (now >= client->second->aliveNextRequest && client->second->aliveInterval != 0)
+        {
+            /* Send Alive Request */
+            IoTRequest aliveRequest = {
+                IOT_VERSION,
+                EIoTMethod::ALIVE_REQUEST,
+                0,
+                NULL,
+                std::map<char *, char *>(),
+                NULL,
+                0,
+                0,
+                0,
+                client->second};
+            IoTRequestResponse aliveRequestResponse = {
+                NULL,
+                &this->onAliveRequestTimeout,
+                this->timeout};
+
+            this->aliveRequest(&aliveRequest, &aliveRequestResponse);
+
+            /* Schedule the next alive request */
+            client->second->aliveNextRequest = millis() + (client->second->aliveInterval * 1000);
+
+            /* Read again for alive response */
+            this->readClient(client->second);
         }
-    }
 
-    /* MultiPart Timeout */
-    for (auto mpc = this->multiPartControl.begin(); mpc != this->multiPartControl.end(); ++mpc)
-    {
-        unsigned long timeout = mpc->second.timeout;
-        if (now >= timeout)
+        /* Timeout */
+        for (auto rr = client->second->requestResponse.begin(); rr != client->second->requestResponse.end(); ++rr)
         {
-            this->requestResponse.erase(mpc->first);
-            continue;
+            unsigned long timeout = rr->second.timeout;
+            if (now >= timeout)
+            {
+                OnTimeout *onTimeout = rr->second.onTimeout;
+                if (onTimeout != NULL)
+                {
+                    (*onTimeout)(&(rr->second.request));
+                }
+
+                client->second->requestResponse.erase(rr->second.request.id);
+                continue;
+            }
+        }
+
+        /* MultiPart Timeout */
+        for (auto mpc = client->second->multiPartControl.begin(); mpc != client->second->multiPartControl.end(); ++mpc)
+        {
+            unsigned long timeout = mpc->second.timeout;
+            if (now >= timeout)
+            {
+                client->second->requestResponse.erase(mpc->first);
+                continue;
+            }
         }
     }
 }
