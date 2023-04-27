@@ -35,8 +35,12 @@ enum class EIoTMethod : uint8_t
     SIGNAL = 0x1,
     REQUEST = 0x2,
     RESPONSE = 0x3,
-    STREAMING = 0x4
+    STREAMING = 0x4,
+    ALIVE_REQUEST = 0x5,
+    ALIVE_RESPOND = 0x6
 };
+
+struct IoTClient;
 struct IoTRequest
 {
     uint8_t version;
@@ -48,7 +52,7 @@ struct IoTRequest
     size_t bodyLength;
     size_t totalBodyLength;
     size_t parts;
-    Client *client;
+    IoTClient *iotClient;
 };
 
 typedef std::function<void(void)> Next;
@@ -72,18 +76,35 @@ struct IoTMultiPart
     unsigned long timeout;
 };
 
-class IoTApp
+struct IoTClient
+{
+    Client *client;
+    std::map<uint16_t, IoTRequestResponse> requestResponse;
+    std::map<uint16_t, IoTMultiPart> multiPartControl;
+    uint8_t *remainBuffer; /* Remain data on buffer o be processed */
+    size_t remainBufferLength;
+    bool lockedForWrite;
+    /* Alive */
+    uint16_t aliveInterval;
+    unsigned long aliveNextRequest;
+};
+
+class IoTProtocol
 {
 private:
-    std::vector<Client *> clients;
-    void onData(Client *client, uint8_t *buffer, size_t bufLen);
-    std::map<uint16_t, IoTRequestResponse> requestResponse = std::map<uint16_t, IoTRequestResponse>();
-    std::map<uint16_t, IoTMultiPart> multiPartControl = std::map<uint16_t, IoTMultiPart>();
-    uint8_t *remainBuffer = NULL; /* Reamins data on buffert o be processed */
-    size_t remainBufferLength = 0;
+    std::map<Client *, IoTClient*> clients = std::map<Client *, IoTClient*>();
+    void onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen);
+    // std::map<uint16_t, IoTRequestResponse> requestResponse = std::map<uint16_t, IoTRequestResponse>();
+    // std::map<uint16_t, IoTMultiPart> multiPartControl = std::map<uint16_t, IoTMultiPart>();
+    // uint8_t *remainBuffer = NULL; /* Remain data on buffer o be processed */
+    // size_t remainBufferLength = 0;
+
+    /* Alive Request Response */
+    // OnResponse onAliveRequestResponse;
+    OnTimeout onAliveRequestTimeout;
 
 public:
-    IoTApp(unsigned long timeout = 1000, uint32_t delay = 300);
+    IoTProtocol(unsigned long timeout = 1000, uint32_t delay = 300);
     uint32_t delay = 300;
     unsigned long timeout = 1000;
 
@@ -92,19 +113,21 @@ public:
     /* Common methods */
     void use(IoTMiddleware middleware);
     void runMiddleware(IoTRequest *request, int index);
-    void listen(Client *client);
-    uint16_t generateRequestId();
+    void listen(IoTClient *iotClient);
+    uint16_t generateRequestId(IoTClient *iotClient);
+    IoTRequest *aliveRequest(IoTRequest *request, IoTRequestResponse *requestResponse);
+    IoTRequest *aliveRespond(IoTRequest *request);
     IoTRequest *signal(IoTRequest *request);
     IoTRequest *request(IoTRequest *request, IoTRequestResponse *requestResponse);
     IoTRequest *response(IoTRequest *request);
     IoTRequest *streaming(IoTRequest *request, IoTRequestResponse *requestResponse);
     IoTRequest *send(IoTRequest *request, IoTRequestResponse *requestResponse);
-    void resetRemainBuffer();
+    void resetRemainBuffer(IoTClient *iotClient);
 
     /* Helper methods */
     void freeRequest(IoTRequest *request);
     void resetClients();
-    void readClient(Client *client);
+    void readClient(IoTClient *iotClient);
     void loop();
 };
 
