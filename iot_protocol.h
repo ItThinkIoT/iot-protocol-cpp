@@ -37,7 +37,7 @@ enum class EIoTMethod : uint8_t
     RESPONSE = 0x3,
     STREAMING = 0x4,
     ALIVE_REQUEST = 0x5,
-    ALIVE_RESPOND = 0x6
+    ALIVE_RESPONSE = 0x6
 };
 
 struct IoTClient;
@@ -66,7 +66,7 @@ struct IoTRequestResponse
     OnTimeout *onTimeout;
 
     unsigned long timeout;
-    IoTRequest request; /* Just for timeout reference */
+    IoTRequest request;
 };
 
 struct IoTMultiPart
@@ -75,6 +75,8 @@ struct IoTMultiPart
     uint32_t received; /* Bytes received */
     unsigned long timeout;
 };
+
+typedef std::function<void(IoTClient *iotClient)> OnDisconnect;
 
 struct IoTClient
 {
@@ -87,20 +89,17 @@ struct IoTClient
     /* Alive */
     uint16_t aliveInterval;
     unsigned long aliveNextRequest;
+
+    OnDisconnect *onDisconnect;
 };
 
 class IoTProtocol
 {
 private:
-    std::map<Client *, IoTClient*> clients = std::map<Client *, IoTClient*>();
+    std::map<Client *, IoTClient *> clients = std::map<Client *, IoTClient *>();
     void onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen);
-    // std::map<uint16_t, IoTRequestResponse> requestResponse = std::map<uint16_t, IoTRequestResponse>();
-    // std::map<uint16_t, IoTMultiPart> multiPartControl = std::map<uint16_t, IoTMultiPart>();
-    // uint8_t *remainBuffer = NULL; /* Remain data on buffer o be processed */
-    // size_t remainBufferLength = 0;
 
-    /* Alive Request Response */
-    // OnResponse onAliveRequestResponse;
+    /* Alive Request Response Timeout */
     OnTimeout onAliveRequestTimeout;
 
 public:
@@ -115,18 +114,19 @@ public:
     void runMiddleware(IoTRequest *request, int index);
     void listen(IoTClient *iotClient);
     uint16_t generateRequestId(IoTClient *iotClient);
-    IoTRequest *aliveRequest(IoTRequest *request, IoTRequestResponse *requestResponse);
-    IoTRequest *aliveRespond(IoTRequest *request);
     IoTRequest *signal(IoTRequest *request);
     IoTRequest *request(IoTRequest *request, IoTRequestResponse *requestResponse);
     IoTRequest *response(IoTRequest *request);
     IoTRequest *streaming(IoTRequest *request, IoTRequestResponse *requestResponse);
+    IoTRequest *aliveRequest(IoTRequest *request, IoTRequestResponse *requestResponse);
+    IoTRequest *aliveResponse(IoTRequest *request);
     IoTRequest *send(IoTRequest *request, IoTRequestResponse *requestResponse);
     void resetRemainBuffer(IoTClient *iotClient);
+    void scheduleNextAliveRequest(IoTClient *iotClient);
 
     /* Helper methods */
     void freeRequest(IoTRequest *request);
-    void resetClients();
+    // void resetClients();
     void readClient(IoTClient *iotClient);
     void loop();
 };
