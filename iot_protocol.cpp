@@ -91,7 +91,6 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
     /* Alive Method */
     if (request.method == EIoTMethod::ALIVE_REQUEST)
     {
-        Serial.println("Receive alive request");
         /* Respond the alive Request  */
         IoTRequest aliveResponse = {
             IOT_VERSION,
@@ -110,21 +109,6 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
         this->scheduleNextAliveRequest(iotClient);
 
         return this->freeRequest(&request);
-    }
-    if (request.method == EIoTMethod::ALIVE_RESPONSE)
-    {
-        Serial.println("Receive alive response");
-        /* Cancel timeout */
-        // for (auto rr = iotClient->requestResponse.begin(); rr != iotClient->requestResponse.end(); rr++)
-        // {
-        //     if (rr->second.request.method != EIoTMethod::ALIVE_REQUEST)
-        //     {
-        //         continue;
-        //     }
-
-        //     iotClient->requestResponse.erase(rr->first);
-        // }
-        // return this->freeRequest(&request);
     }
 
     /* ID */
@@ -292,7 +276,7 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
     }
     else
     {
-        if (request.method != EIoTMethod::RESPONSE)
+        if (request.method != EIoTMethod::RESPONSE && request.method != EIoTMethod::ALIVE_RESPONSE)
         {
             /* Middleware */
             this->runMiddleware(&request);
@@ -342,7 +326,6 @@ IoTRequest *IoTProtocol::streaming(IoTRequest *request, IoTRequestResponse *requ
 
 IoTRequest *IoTProtocol::aliveRequest(IoTRequest *request, IoTRequestResponse *requestResponse)
 {
-    Serial.println("Send alive request");
     request->method = EIoTMethod::ALIVE_REQUEST;
     request->id = 0;
     freeRequest(request);
@@ -354,7 +337,6 @@ IoTRequest *IoTProtocol::aliveRequest(IoTRequest *request, IoTRequestResponse *r
 
 IoTRequest *IoTProtocol::aliveResponse(IoTRequest *request)
 {
-    Serial.println("Send alive response");
     request->method = EIoTMethod::ALIVE_RESPONSE;
     request->id = 0;
     freeRequest(request);
