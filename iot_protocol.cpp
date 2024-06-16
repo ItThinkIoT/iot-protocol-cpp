@@ -705,3 +705,17 @@ void IoTProtocol::loop()
         }
     }
 }
+
+
+const char *IoTProtocol::getHeader(IoTRequest *request, const char *headerKey)
+{
+    for (auto header = request->headers.begin(); header != request->headers.end(); ++header)
+    {
+        if (strcmp(header->first, headerKey) == 0)
+        {
+            return header->second;
+        }
+    }
+
+    return nullptr;
+}

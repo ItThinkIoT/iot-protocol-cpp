@@ -129,6 +129,9 @@ public:
     // void resetClients();
     void readClient(IoTClient *iotClient);
     void loop();
+
+    /* Utils for app layer */
+    const char *getHeader(IoTRequest *request, const char *headerKey);
 };
 
 // #ifdef __cplusplus
