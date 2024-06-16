@@ -675,8 +675,7 @@ void IoTProtocol::loop()
         /* Timeout */
         if (iotClient->second != NULL)
         {
-            auto requestResponse = iotClient->second->requestResponse;
-            for (auto rr = requestResponse.begin(); rr != requestResponse.end(); rr++)
+            for (auto rr = iotClient->second->requestResponse.begin(); rr != iotClient->second->requestResponse.end(); rr++)
             {
                 unsigned long timeout = rr->second.timeout;
                 if (now >= timeout)
@@ -687,7 +686,7 @@ void IoTProtocol::loop()
                         (*onTimeout)(&(rr->second.request));
                     }
 
-                    requestResponse.erase(rr);
+                    iotClient->second->requestResponse.erase(rr);
                     continue;
                 }
             }
