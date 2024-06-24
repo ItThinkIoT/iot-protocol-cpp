@@ -156,7 +156,6 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
             memcpy(headerValue, (buffer + indexRS + 1), valueLength);
             headerValue[valueLength] = '\0';
 
-            // String key = String((buffer + offset), );
             request.headers.insert(std::make_pair(headerKey, headerValue));
 
             offset = indexEXT + 1;
@@ -405,7 +404,6 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
         dataLength += pathLength + 1 /* (EXT) */;
     }
 
-    String headers = "";
     size_t headersLength = 0;
     uint8_t headerSize = request->headers.size() & 255;
     if (LSCB & IOT_LSCB_HEADER)
