@@ -673,7 +673,8 @@ void IoTProtocol::loop()
         /* Timeout */
         if (iotClient->second != NULL)
         {
-            for (auto rr = iotClient->second->requestResponse.begin(); rr != iotClient->second->requestResponse.end(); rr++)
+            IoTClient *c = iotClient->second;
+            for (auto rr = iotClient->second->requestResponse.begin(); (c != nullptr) && (c->requestResponse.contains(rr->first)) && rr != c->requestResponse.end(); )
             {
                 unsigned long timeout = rr->second.timeout;
                 if (now >= timeout)
@@ -684,9 +685,12 @@ void IoTProtocol::loop()
                         (*onTimeout)(&(rr->second.request));
                     }
 
-                    iotClient->second->requestResponse.erase(rr);
+                    c->requestResponse.erase(rr->first);
+
                     continue;
                 }
+
+                rr++;
             }
 
             /* MultiPart Timeout */
@@ -703,7 +707,6 @@ void IoTProtocol::loop()
         }
     }
 }
-
 
 const char *IoTProtocol::getHeader(IoTRequest *request, const char *headerKey)
 {
