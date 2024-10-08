@@ -26,7 +26,13 @@
 #define IOT_LSCB_HEADER 0b00000010
 #define IOT_LSCB_BODY 0b00000001
 
-#define IOT_PROTOCOL_BUFFER_SIZE 1024
+#ifndef IOT_PROTOCOL_DEFAULT_ALIVE_INTERVAL
+#define IOT_PROTOCOL_DEFAULT_ALIVE_INTERVAL 60
+#endif 
+
+#ifndef IOT_PROTOCOL_DEFAULT_BUFFER_SIZE
+#define IOT_PROTOCOL_DEFAULT_BUFFER_SIZE 1024
+#endif 
 
 #define IOT_MULTIPART_TIMEOUT 5000
 
@@ -37,7 +43,9 @@ enum class EIoTMethod : uint8_t
     RESPONSE = 0x3,
     STREAMING = 0x4,
     ALIVE_REQUEST = 0x5,
-    ALIVE_RESPONSE = 0x6
+    ALIVE_RESPONSE = 0x6,
+    BUFFER_SIZE_REQUEST = 0x7,
+    BUFFER_SIZE_RESPONSE = 0x8
 };
 
 struct IoTClient;
@@ -89,6 +97,8 @@ struct IoTClient
     /* Alive */
     uint16_t aliveInterval;
     unsigned long aliveNextRequest;
+    /* Buffer */
+    uint32_t bufferSize;
 
     OnDisconnect *onDisconnect;
 };
@@ -101,6 +111,9 @@ private:
 
     /* Alive Request Response Timeout */
     OnTimeout onAliveRequestTimeout;
+
+    /* Buffer Size Response */
+    OnResponse onBufferSizeResponse;
 
 public:
     IoTProtocol(unsigned long timeout = 1000, uint32_t delay = 300);
@@ -120,6 +133,8 @@ public:
     IoTRequest *streaming(IoTRequest *request, IoTRequestResponse *requestResponse);
     IoTRequest *aliveRequest(IoTRequest *request, IoTRequestResponse *requestResponse);
     IoTRequest *aliveResponse(IoTRequest *request);
+    IoTRequest *bufferSizeRequest(IoTClient *iotClient, uint32_t size);
+    IoTRequest *bufferSizeResponse(IoTRequest *request);
     IoTRequest *send(IoTRequest *request, IoTRequestResponse *requestResponse);
     void resetRemainBuffer(IoTClient *iotClient);
     void scheduleNextAliveRequest(IoTClient *iotClient);

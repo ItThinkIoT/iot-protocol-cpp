@@ -19,6 +19,13 @@ IoTProtocol::IoTProtocol(unsigned long timeout, uint32_t delay)
             (*(request->iotClient->onDisconnect))(request->iotClient);
         }
     };
+
+    this->onBufferSizeResponse = [this](IoTRequest *response)
+    {
+        if (response->method != EIoTMethod::BUFFER_SIZE_REQUEST || response->method != EIoTMethod::BUFFER_SIZE_RESPONSE)
+            return;
+        response->iotClient->bufferSize = (response->body[0] << 24) + (response->body[1] << 16) + (response->body[2] << 8) + response->body[3];
+    };
 }
 
 void IoTProtocol::use(IoTMiddleware middleware)
@@ -55,7 +62,11 @@ void IoTProtocol::listen(IoTClient *iotClient)
     iotClient->lockedForWrite = false;
     if (iotClient->aliveInterval == 0)
     {
-        iotClient->aliveInterval = 60;
+        iotClient->aliveInterval = IOT_PROTOCOL_DEFAULT_ALIVE_INTERVAL;
+    }
+    if (iotClient->bufferSize == 0)
+    {
+        iotClient->bufferSize = IOT_PROTOCOL_DEFAULT_BUFFER_SIZE;
     }
     this->scheduleNextAliveRequest(iotClient);
 
@@ -183,6 +194,10 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
         case EIoTMethod::STREAMING:
             bodyLengthSize = 4;
             break;
+        case EIoTMethod::BUFFER_SIZE_REQUEST:
+        case EIoTMethod::BUFFER_SIZE_RESPONSE:
+            bodyLengthSize = 1;
+            break;
         }
 
         request.bodyLength = 0;
@@ -275,7 +290,7 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
     }
     else
     {
-        if (request.method != EIoTMethod::RESPONSE && request.method != EIoTMethod::ALIVE_RESPONSE)
+        if (request.method != EIoTMethod::RESPONSE && request.method != EIoTMethod::ALIVE_RESPONSE && request.method != EIoTMethod::BUFFER_SIZE_RESPONSE)
         {
             /* Middleware */
             this->runMiddleware(&request);
@@ -284,6 +299,15 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
 
     /* Cancel next alive request and schedule another one from now */
     this->scheduleNextAliveRequest(iotClient);
+
+    /* Buffer Size */
+    if (request.method == EIoTMethod::BUFFER_SIZE_REQUEST)
+    {
+        /* Set buffer size */
+        iotClient->bufferSize = (request.body[0] << 24) + (request.body[1] << 16) + (request.body[2] << 8) + request.body[3];
+        /* Respond buffer size */
+        this->bufferSizeResponse(&request);
+    }
 
     this->freeRequest(&request);
 }
@@ -345,6 +369,42 @@ IoTRequest *IoTProtocol::aliveResponse(IoTRequest *request)
     return this->send(request, NULL);
 }
 
+IoTRequest *IoTProtocol::bufferSizeRequest(IoTClient *iotClient, uint32_t size)
+{
+    IoTRequest request = {
+        IOT_VERSION,
+        EIoTMethod::BUFFER_SIZE_REQUEST,
+        0,
+        NULL,
+        std::map<char *, char *>(),
+        (uint8_t *)&size,
+        4,
+        0,
+        0,
+        iotClient};
+    IoTRequestResponse onResponse = {
+        &(this->onBufferSizeResponse),
+        NULL};
+    this->send(&request, &onResponse);
+}
+
+IoTRequest *IoTProtocol::bufferSizeResponse(IoTRequest *request)
+{
+    IoTRequest response = {
+        IOT_VERSION,
+        EIoTMethod::BUFFER_SIZE_RESPONSE,
+        request->id,
+        NULL,
+        std::map<char *, char *>(),
+        request->body,
+        request->bodyLength,
+        0,
+        0,
+        request->iotClient};
+
+    return this->send(&response, NULL);
+}
+
 IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestResponse)
 {
 
@@ -382,6 +442,9 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
     case EIoTMethod::ALIVE_RESPONSE:
         bodyLengthSize = 0;
         break;
+    case EIoTMethod::BUFFER_SIZE_REQUEST:
+    case EIoTMethod::BUFFER_SIZE_RESPONSE:
+        bodyLengthSize = 1;
     }
 
     /* Sum Total Data Length */
@@ -415,7 +478,7 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
         dataLength += headersLength + 1; /* +1 (headerSize) */
     }
 
-    if ((pathLength + headersLength) > IOT_PROTOCOL_BUFFER_SIZE - 8)
+    if ((pathLength + headersLength) > ((request->iotClient->bufferSize) - 8))
     {
         throw "[IoTProtocol] Path and Headers too big.";
     }
@@ -429,9 +492,9 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
         bodyLengthSize = 0;
     }
 
-    if (dataLength > IOT_PROTOCOL_BUFFER_SIZE)
+    if (dataLength > request->iotClient->bufferSize)
     {
-        dataLength = IOT_PROTOCOL_BUFFER_SIZE;
+        dataLength = request->iotClient->bufferSize;
     }
 
     /* Record Data */
@@ -507,7 +570,7 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
         if (request->bodyLength > 0) // 1060 > 0
         {
             size_t bodyBufferRemain = (request->bodyLength - i);
-            size_t bodyUntilIndex = ((bodyBufferRemain + indexData) > IOT_PROTOCOL_BUFFER_SIZE) ? i + (IOT_PROTOCOL_BUFFER_SIZE - indexData) : i + bodyBufferRemain;
+            size_t bodyUntilIndex = ((bodyBufferRemain + indexData) > request->iotClient->bufferSize) ? i + ((request->iotClient->bufferSize) - indexData) : i + bodyBufferRemain;
             for (; i < bodyUntilIndex; i++)
             {
                 *(data + (indexData++)) = *(request->body + i);
@@ -606,7 +669,8 @@ void IoTProtocol::readClient(IoTClient *iotClient)
     {
         return;
     }
-    uint8_t buffer[IOT_PROTOCOL_BUFFER_SIZE + 1];
+
+    uint8_t buffer[(iotClient->bufferSize) + 1];
     size_t bufferLength = 0;
 
     if (iotClient->remainBuffer != NULL)
@@ -619,7 +683,7 @@ void IoTProtocol::readClient(IoTClient *iotClient)
         this->resetRemainBuffer(iotClient);
     }
 
-    while (iotClient->client->available() && bufferLength < IOT_PROTOCOL_BUFFER_SIZE)
+    while (iotClient->client->available() && bufferLength < iotClient->bufferSize)
     {
         buffer[bufferLength++] = iotClient->client->read();
     }
@@ -674,7 +738,7 @@ void IoTProtocol::loop()
         if (iotClient->second != NULL)
         {
             IoTClient *c = iotClient->second;
-            for (auto rr = iotClient->second->requestResponse.begin(); (c != nullptr) && (c->requestResponse.contains(rr->first)) && rr != c->requestResponse.end(); )
+            for (auto rr = iotClient->second->requestResponse.begin(); (c != nullptr) && (c->requestResponse.contains(rr->first)) && rr != c->requestResponse.end();)
             {
                 unsigned long timeout = rr->second.timeout;
                 if (now >= timeout)
