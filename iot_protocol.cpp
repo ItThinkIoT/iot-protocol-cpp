@@ -289,7 +289,9 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
     }
     else
     {
-        if (request.method != EIoTMethod::RESPONSE && request.method != EIoTMethod::ALIVE_RESPONSE && request.method != EIoTMethod::BUFFER_SIZE_RESPONSE)
+        if (request.method == EIoTMethod::SIGNAL ||
+            request.method != EIoTMethod::REQUEST ||
+            request.method != EIoTMethod::STREAMING)
         {
             /* Middleware */
             this->runMiddleware(&request);
@@ -374,7 +376,7 @@ IoTRequest *IoTProtocol::bufferSizeRequest(IoTClient *iotClient, uint32_t size)
     uint8_t body[4];
     for (uint8_t i = 0; i < 4; i++)
     {
-        body[i] = (size >> (24-(i*8))) & (0xFF);
+        body[i] = (size >> (24 - (i * 8))) & (0xFF);
     }
     // body[0] = size >> 24 & (0xFF);
     // body[1] = size >> 16 & (0xFF);
