@@ -22,7 +22,7 @@ IoTProtocol::IoTProtocol(unsigned long timeout, uint32_t delay)
 
     this->onBufferSizeResponse = [this](IoTRequest *response)
     {
-        if (response->method != EIoTMethod::BUFFER_SIZE_REQUEST || response->method != EIoTMethod::BUFFER_SIZE_RESPONSE)
+        if (response->method != EIoTMethod::BUFFER_SIZE_RESPONSE)
             return;
         response->iotClient->bufferSize = (response->body[0] << 24) + (response->body[1] << 16) + (response->body[2] << 8) + response->body[3];
     };
@@ -64,11 +64,12 @@ void IoTProtocol::listen(IoTClient *iotClient)
     {
         iotClient->aliveInterval = IOT_PROTOCOL_DEFAULT_ALIVE_INTERVAL;
     }
+    this->scheduleNextAliveRequest(iotClient);
+
     if (iotClient->bufferSize == 0)
     {
         iotClient->bufferSize = IOT_PROTOCOL_DEFAULT_BUFFER_SIZE;
     }
-    this->scheduleNextAliveRequest(iotClient);
 
     this->clients.insert(std::make_pair(iotClient->client, iotClient));
 }
@@ -189,14 +190,12 @@ void IoTProtocol::onData(IoTClient *iotClient, uint8_t *buffer, size_t bufLen)
         switch (request.method)
         {
         case EIoTMethod::SIGNAL:
+        case EIoTMethod::BUFFER_SIZE_REQUEST:
+        case EIoTMethod::BUFFER_SIZE_RESPONSE:
             bodyLengthSize = 1;
             break;
         case EIoTMethod::STREAMING:
             bodyLengthSize = 4;
-            break;
-        case EIoTMethod::BUFFER_SIZE_REQUEST:
-        case EIoTMethod::BUFFER_SIZE_RESPONSE:
-            bodyLengthSize = 1;
             break;
         }
 
@@ -471,6 +470,11 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
     uint8_t headerSize = request->headers.size() & 255;
     if (LSCB & IOT_LSCB_HEADER)
     {
+        if (request->headers.size() > 255 )
+        {
+            throw "[IoTProtocol] Too many headers. Maximum Headers is 255.";
+        }
+
         for (auto header = request->headers.begin(); header != request->headers.end(); ++header)
         {
             headersLength += strlen(header->first) + strlen(header->second) + 2; /* + 1 (RS) + 1 (EXT) */
