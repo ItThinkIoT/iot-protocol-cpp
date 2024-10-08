@@ -370,13 +370,24 @@ IoTRequest *IoTProtocol::aliveResponse(IoTRequest *request)
 
 IoTRequest *IoTProtocol::bufferSizeRequest(IoTClient *iotClient, uint32_t size)
 {
+    // 2048 : [0, 0 , 8, 0]
+    uint8_t body[4];
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        body[i] = (size >> (24-(i*8))) & (0xFF);
+    }
+    // body[0] = size >> 24 & (0xFF);
+    // body[1] = size >> 16 & (0xFF);
+    // body[2] = size >> 8 & (0xFF);
+    // body[3] = size & (0xFF);
+
     IoTRequest request = {
         IOT_VERSION,
         EIoTMethod::BUFFER_SIZE_REQUEST,
         0,
         NULL,
         std::map<char *, char *>(),
-        (uint8_t *)&size,
+        body,
         4,
         0,
         0,
@@ -384,7 +395,7 @@ IoTRequest *IoTProtocol::bufferSizeRequest(IoTClient *iotClient, uint32_t size)
     IoTRequestResponse onResponse = {
         &(this->onBufferSizeResponse),
         NULL};
-    this->send(&request, &onResponse);
+    return this->send(&request, &onResponse);
 }
 
 IoTRequest *IoTProtocol::bufferSizeResponse(IoTRequest *request)
@@ -470,7 +481,7 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
     uint8_t headerSize = request->headers.size() & 255;
     if (LSCB & IOT_LSCB_HEADER)
     {
-        if (request->headers.size() > 255 )
+        if (request->headers.size() > 255)
         {
             throw "[IoTProtocol] Too many headers. Maximum Headers is 255.";
         }
