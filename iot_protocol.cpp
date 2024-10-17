@@ -580,7 +580,7 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
 
     size_t prefixDataIndex = nextIndex;
 
-    std::function<size_t(size_t, size_t)> writeBodyPart = [&writeBodyPart, this, request, prefixDataIndex, &data](size_t i = 0, size_t parts = 0)
+    std::function<size_t(size_t, size_t)> writeBodyPart = [&writeBodyPart, this, request, prefixDataIndex, &data, requestResponse](size_t i = 0, size_t parts = 0)
     {
         size_t indexData = prefixDataIndex + 1; // 42
         /* Body */
@@ -603,6 +603,10 @@ IoTRequest *IoTProtocol::send(IoTRequest *request, IoTRequestResponse *requestRe
         }
 
         request->iotClient->client->write(data, indexData);
+
+        if(requestResponse != NULL && requestResponse->onPartSent != NULL) {
+            (*(requestResponse->onPartSent))(request, i, parts);
+        }
 
         parts++;
         if (i >= request->bodyLength)
@@ -740,6 +744,7 @@ void IoTProtocol::loop()
             IoTRequestResponse aliveRequestResponse = {
                 NULL,
                 &this->onAliveRequestTimeout,
+                NULL,
                 this->timeout};
 
             this->aliveRequest(&aliveRequest, &aliveRequestResponse);

@@ -68,10 +68,12 @@ typedef void (*IoTMiddleware)(IoTRequest *, Next *);
 
 typedef std::function<void(IoTRequest *response)> OnResponse;
 typedef std::function<void(IoTRequest *request)> OnTimeout;
+typedef std::function<void(IoTRequest *request, uint32_t totalDataSent, uint32_t part)> OnPartSent;
 struct IoTRequestResponse
 {
     OnResponse *onResponse;
     OnTimeout *onTimeout;
+    OnPartSent *onPartSent;
 
     unsigned long timeout;
     IoTRequest request;
