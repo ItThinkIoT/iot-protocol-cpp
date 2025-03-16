@@ -760,7 +760,7 @@ void IoTProtocol::loop()
         if (iotClient->second != NULL)
         {
             IoTClient *c = iotClient->second;
-            for (auto rr = iotClient->second->requestResponse.begin(); (c != nullptr) && (c->requestResponse.contains(rr->first)) && rr != c->requestResponse.end();)
+            for (auto rr = iotClient->second->requestResponse.begin(); (c != nullptr) && (c->requestResponse.find(rr->first) != c->requestResponse.end()) && rr != c->requestResponse.end();)
             {
                 unsigned long timeout = rr->second.timeout;
                 if (now >= timeout)
