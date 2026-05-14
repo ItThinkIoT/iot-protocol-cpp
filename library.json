@@ -1,0 +1,19 @@
+{
+    "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
+    "name": "iot_protocol@ithtink",
+    "version": "1.0.0",
+    "keywords": "iot protocol http tcp",
+    "description": "IoT Protocol is a protocol over TCP based on HTTP for light data traffic.",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/ItThinkIoT/iot-protocol-cpp"
+    },
+    "authors": {
+        "name": "Guilherme Gregorini",
+        "email": "guilherme@itthink.io",
+        "url": "https://www.github.com/Guihgo"
+    },
+    "dependencies": {},
+    "frameworks": "arduino",
+    "platforms": "espressif8266, espressif32"
+}
